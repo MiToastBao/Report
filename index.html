@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>監測報告趨勢圖產生器</title>
+<link rel="stylesheet" href="css/app.css?v=1.0.1">
+</head>
+<body>
+<div class="shell">
+  <aside class="side" id="side">
+    <div class="brand">
+      <div class="mark" aria-hidden="true"><svg viewBox="0 0 32 32" width="26" height="26"><rect x="5" y="16" width="4.5" height="11" rx="1.2" fill="#fff" opacity=".55"/><rect x="11.5" y="10" width="4.5" height="17" rx="1.2" fill="#fff" opacity=".8"/><rect x="18" y="13" width="4.5" height="14" rx="1.2" fill="#fff" opacity=".65"/><rect x="24.5" y="6" width="4.5" height="21" rx="1.2" fill="#fff"/><path d="M3 9.5 H29" stroke="#ff8a8a" stroke-width="1.6" stroke-dasharray="2.6 2"/></svg></div>
+      <div>
+        <div class="brand-name">監測報告<br>趨勢圖產生器</div>
+        <div class="brand-ver" id="verPill">v1.0.1</div>
+      </div>
+    </div>
+    <div class="proj-box">
+      <div class="proj-label">目前計畫</div>
+      <div class="proj-cur" id="projCur">尚未建立計畫</div>
+      <select id="projSel" class="proj-sel" aria-label="切換計畫"></select>
+      <div class="proj-meta" id="projMeta">尚未建立計畫</div>
+    </div>
+    <nav class="nav" id="nav">
+      <div class="nav-group">計畫與匯入</div>
+      <button class="nav-item" data-sec="projects"><span class="nav-no">1</span>計畫管理</button>
+      <button class="nav-item" data-sec="import"><span class="nav-no">2</span>匯入報告</button>
+      <div class="nav-group">資料</div>
+      <button class="nav-item" data-sec="data"><span class="nav-no">3</span>資料檢視</button>
+      <button class="nav-item" data-sec="check"><span class="nav-no">4</span>資料異常檢查<span class="nav-badge" id="checkBadge" hidden></span></button>
+      <button class="nav-item" data-sec="std"><span class="nav-no">5</span>測項與標準值</button>
+      <div class="nav-group">輸出</div>
+      <button class="nav-item" data-sec="chart"><span class="nav-no">6</span>趨勢圖與報告表格</button>
+      <div class="nav-group">不分計畫</div>
+      <button class="nav-item" data-sec="moenv"><span class="nav-no">7</span>環境部資料查詢</button>
+      <button class="nav-item" data-sec="backup"><span class="nav-no">8</span>備份與還原</button>
+      <a class="nav-item nav-link" href="使用說明.html?v=1.0.1" target="_blank" rel="noopener"><span class="nav-no">?</span>使用說明</a>
+    </nav>
+    <div class="side-foot">資料只存在這台電腦的瀏覽器，不會上傳。</div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <div class="crumb" id="crumb">計畫與匯入</div>
+        <h1 id="secTitle">計畫管理</h1>
+      </div>
+      <div class="top-proj" id="topProj"></div>
+    </header>
+    <div id="toast" class="toast" hidden></div>
+
+    <!-- 1 計畫管理 -->
+    <section class="sec" id="sec-projects">
+      <div class="card">
+        <div class="card-head"><div><div class="eyebrow">PROJECTS</div><h2>建立計畫</h2></div></div>
+        <p class="muted">每個計畫的匯入資料、測站名稱對照、標準值與圖表設定都各自獨立，切換計畫不會影響另一個計畫。</p>
+        <div class="form-row">
+          <label>計畫編號<input id="pCode" maxlength="20" placeholder="例：A001"></label>
+          <label class="grow">計畫名稱<input id="pName" maxlength="60" placeholder="例：○○捷運延伸線環境監測"></label>
+          <button class="btn primary" id="pAdd">＋ 建立計畫</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><div><div class="eyebrow">LIST</div><h2>計畫清單</h2></div></div>
+        <div id="projList"></div>
+      </div>
+    </section>
+
+    <!-- 2 匯入 -->
+    <section class="sec" id="sec-import" hidden>
+      <div class="card">
+        <div class="card-head"><div><div class="eyebrow">IMPORT</div><h2>匯入監測報告</h2></div></div>
+        <label class="drop" id="drop">
+          <input type="file" id="fileInput" multiple accept=".doc,.docx,.xls,.xlsx">
+          <div class="drop-icon">⇪</div>
+          <div class="drop-main">把檔案拖到這裡，或<b>點一下選擇檔案</b></div>
+          <div class="drop-sub">支援 Word（.doc／.docx）月報、季報、年報，以及 Excel（.xls／.xlsx）檢測報告或彙整表；新舊版都可以，可一次選多個檔案。</div>
+        </label>
+        <p class="muted small">程式會掃描每一張表格，自動找出測站、採樣日期、測項、數值與標準值，先列出來讓你確認、修改，按下「確認匯入」才會存進計畫。掃描的 PDF 無法判讀，請向檢驗室索取 Word 或 Excel 電子檔。</p>
+      </div>
+      <div id="importArea"></div>
+      <div class="sticky-bar" id="importBar" hidden>
+        <div id="importSum"></div>
+        <div class="bar-actions">
+          <button class="btn" id="importClear">清除這批</button>
+          <button class="btn primary" id="importGo">確認匯入</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3 資料檢視 -->
+    <section class="sec" id="sec-data" hidden>
+      <div class="card">
+        <div class="card-head"><div><div class="eyebrow">DATA</div><h2>已匯入的資料</h2></div><div class="head-actions"><button class="btn" id="dAdd">＋ 手動新增一筆</button></div></div>
+        <div class="filters">
+          <label>類別<select id="dCat"></select></label>
+          <label>測站<select id="dSt"></select></label>
+          <label>測項<select id="dItem"></select></label>
+          <label>期間<select id="dPeriod"></select></label>
+          <label class="grow">搜尋<input id="dQ" placeholder="數值、來源檔名…"></label>
+        </div>
+        <div id="dAddForm" hidden class="subcard"></div>
+        <div class="table-actions">
+          <span id="dCount" class="muted"></span>
+          <span class="spacer"></span>
+          <button class="btn small" id="dExcl">勾選的設為不採用</button>
+          <button class="btn small" id="dIncl">勾選的恢復採用</button>
+          <button class="btn small danger" id="dDel">刪除勾選的</button>
+        </div>
+        <div class="table-wrap" id="dTable"></div>
+      </div>
+    </section>
+
+    <!-- 4 異常檢查 -->
+    <section class="sec" id="sec-check" hidden>
+      <div class="card">
+        <div class="card-head"><div><div class="eyebrow">CHECK</div><h2>資料異常檢查</h2></div><div class="head-actions"><button class="btn primary" id="cRun">重新檢查</button></div></div>
+        <p class="muted">一次列出判讀不出來的數值、異常高低值、兩份檔案數值不一致、缺測項、名稱很像的測站、單位不一致與超過標準值。可以批次勾選後按「確認無誤」（從清單消失）、「不採用」（圖表與報告表格不使用），或直接修改數值。</p>
+        <div class="chips" id="cChips"></div>
+        <div class="table-actions">
+          <label class="chk"><input type="checkbox" id="cAll"> 全選目前清單</label>
+          <span class="spacer"></span>
+          <button class="btn small" id="cOk">勾選的確認無誤</button>
+          <button class="btn small" id="cExcl">勾選的不採用</button>
+          <button class="btn small" id="cReset">重新顯示已確認的項目</button>
+        </div>
+        <div id="cList"></div>
+      </div>
+    </section>
+
+    <!-- 5 標準值 -->
+    <section class="sec" id="sec-std" hidden>
+      <div class="card">
+        <div class="card-head"><div><div class="eyebrow">STANDARDS</div><h2>測項、單位與標準值</h2></div></div>
+        <p class="muted">匯入時從報告的「標準值／管制標準」列自動帶入，也可以自己修改。標準值寫法：單一值「75」、範圍「6~9」（畫兩條線）、多個值「35/38」。標準值有改過（例如每年加嚴），就為同一測項新增多筆、各自填「適用期間」，趨勢圖上每條線只畫在自己的期間。不同測站可以有不同標準（例如不同管制區）。</p>
+        <div class="filters"><label>類別<select id="sCat"></select></label><span class="spacer"></span><button class="btn" id="sAdd">＋ 新增一筆標準值</button></div>
+        <div class="table-wrap" id="sTable"></div>
+        <h3 class="mt">測項名稱與單位</h3>
+        <p class="muted small">改名會套用到這個類別所有已匯入的資料，之後匯入同名測項也會自動改成新名稱。</p>
+        <div class="table-wrap" id="iTable"></div>
+      </div>
+    </section>
+
+    <!-- 6 趨勢圖 -->
+    <section class="sec" id="sec-chart" hidden>
+      <div class="card">
+        <div class="card-head"><div><div class="eyebrow">CHARTS</div><h2>趨勢長條圖與報告表格</h2></div></div>
+        <div class="grid2">
+          <div>
+            <div class="filters">
+              <label>監測類別<select id="gCat"></select></label>
+              <label>快速選擇<select id="gQuick"></select></label>
+            </div>
+            <div class="filters">
+              <label>起<select id="gFromY"></select></label><label>月<select id="gFromM"></select></label>
+              <label>訖<select id="gToY"></select></label><label>月<select id="gToM"></select></label>
+            </div>
+            <div class="opt-block">
+              <div class="opt-title">圖的樣式</div>
+              <label class="radio"><input type="radio" name="gMode" value="station" checked> 每個測站、每個測項各一張</label>
+              <label class="radio"><input type="radio" name="gMode" value="item"> 每個測項一張，各測站並列</label>
+            </div>
+            <div class="opt-block">
+              <div class="opt-title">X 軸</div>
+              <label class="radio"><input type="radio" name="gX" value="orig" checked> 報告上的採樣日期（原樣）</label>
+              <label class="radio"><input type="radio" name="gX" value="date"> 統一成 YYY.MM.DD</label>
+              <label class="radio"><input type="radio" name="gX" value="month"> 只寫年月 YYY.MM</label>
+            </div>
+            <div class="opt-block">
+              <label class="chk"><input type="checkbox" id="gStd"> 畫標準值紅色虛線（Excel 裡的標準值可以自行修改，線會跟著變）</label>
+              <label class="chk"><input type="checkbox" id="gStdAxis" checked> Y 軸範圍包含標準值（取消時，標準值超出資料範圍就不畫線）</label>
+              <label class="chk"><input type="checkbox" id="gZero" checked> Y 軸從 0 開始</label>
+              <label class="chk"><input type="checkbox" id="gND"> 在圖上標出 ND／&lt;x（不畫長條）</label>
+              <label class="chk"><input type="checkbox" id="gStTitle" checked> 圖標題加上測站名稱（每站一張時）</label>
+            </div>
+            <div class="opt-block">
+              <div class="opt-title">Excel 報告表格分頁</div>
+              <label class="radio"><input type="radio" name="gSplit" value="quarter" checked> 每季一張</label>
+              <label class="radio"><input type="radio" name="gSplit" value="month"> 每月一張</label>
+              <label class="radio"><input type="radio" name="gSplit" value="all"> 整段期間一張</label>
+            </div>
+          </div>
+          <div>
+            <div class="opt-block"><div class="opt-title">測站 <a href="#" class="mini" data-all="gSts">全選</a> <a href="#" class="mini" data-none="gSts">全不選</a></div><div class="checks" id="gSts"></div></div>
+            <div class="opt-block"><div class="opt-title">測項 <a href="#" class="mini" data-all="gItems">全選</a> <a href="#" class="mini" data-none="gItems">全不選</a></div><div class="checks" id="gItems"></div></div>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn primary" id="gGo">產生趨勢圖</button>
+          <button class="btn" id="gXlsx" disabled>下載 Excel（報告表格＋可編輯圖表）</button>
+          <button class="btn" id="gPngAll" disabled>下載全部高解析圖（zip）</button>
+          <span id="gMsg" class="muted"></span>
+        </div>
+      </div>
+      <div id="gOut" class="chart-grid"></div>
+    </section>
+
+    <!-- 7 環境部 -->
+    <section class="sec" id="sec-moenv" hidden>
+      <div class="card">
+        <div class="card-head"><div><div class="eyebrow">MOENV OPEN DATA</div><h2>環境部資料查詢與下載</h2></div></div>
+        <p class="muted">不分計畫都能用。資料來自環境部環境資料開放平臺：空品月值（AQX_P_08，各測站每月平均）與河川水質（WQX_P_01，每月約一次採樣）。只提供查詢與下載，不會存進計畫。若環境部網址變更而查不到，請找 AI 協助修改程式（維護說明在 README.md）。</p>
+        <div class="filters">
+          <label class="radio inline"><input type="radio" name="mKind" value="air" checked> 空氣品質（月值）</label>
+          <label class="radio inline"><input type="radio" name="mKind" value="river"> 河川水質</label>
+        </div>
+        <div class="filters">
+          <label>縣市<select id="mCounty"></select></label>
+          <label class="grow">搜尋測站<input id="mQ" placeholder="測站名稱、河川…"></label>
+          <button class="btn" id="mLoad">更新測站清單</button>
+        </div>
+        <div class="checks tall" id="mSites"><span class="muted">載入中…</span></div>
+        <div class="filters">
+          <label>起（年月）<input type="month" id="mFrom"></label>
+          <label>訖（年月）<input type="month" id="mTo"></label>
+          <label class="chk" id="mQWrap"><input type="checkbox" id="mQuarter" checked> Excel 另加季平均（由月值計算）</label>
+        </div>
+        <div class="actions">
+          <button class="btn primary" id="mGo">查詢</button>
+          <button class="btn" id="mXlsx" disabled>下載 Excel</button>
+          <button class="btn" id="mCsv" disabled>下載原始資料 CSV</button>
+          <span id="mMsg" class="muted"></span>
+        </div>
+        <div class="table-wrap" id="mPreview"></div>
+      </div>
+    </section>
+
+    <!-- 8 備份 -->
+    <section class="sec" id="sec-backup" hidden>
+      <div class="card">
+        <div class="card-head"><div><div class="eyebrow">BACKUP</div><h2>備份與還原</h2></div></div>
+        <p class="muted">資料存在這台電腦的瀏覽器裡。換電腦、清除瀏覽器資料前，請先下載備份檔。</p>
+        <div class="actions">
+          <button class="btn primary" id="bOne">下載目前計畫的備份</button>
+          <button class="btn" id="bAll">下載全部計畫的備份</button>
+          <label class="btn file-btn">從備份檔還原<input type="file" id="bIn" accept=".json"></label>
+        </div>
+        <div id="bMsg" class="muted"></div>
+        <h3 class="mt">儲存空間</h3>
+        <div id="bUsage" class="muted"></div>
+        <div class="actions"><button class="btn" id="bPersist">申請持久保存</button><button class="btn danger" id="bWipe">清除這台電腦上本程式的全部資料</button></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><div><div class="eyebrow">VERSION</div><h2>版本紀錄</h2></div></div>
+        <div id="verList" class="muted"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="vendor/jszip.min.js?v=1.0.1"></script>
+<script src="vendor/xlsx.full.min.js?v=1.0.1"></script>
+<script src="vendor/exceljs.min.js?v=1.0.1"></script>
+<script src="js/version.js?v=1.0.1"></script>
+<script src="js/docread.js?v=1.0.1"></script>
+<script src="js/extract.js?v=1.0.1"></script>
+<script src="js/core.js?v=1.0.1"></script>
+<script src="js/chart.js?v=1.0.1"></script>
+<script src="js/xlsxout.js?v=1.0.1"></script>
+<script src="js/moenv.js?v=1.0.1"></script>
+<script src="js/store.js?v=1.0.1"></script>
+<script src="js/app.js?v=1.0.1"></script>
+</body>
+</html>

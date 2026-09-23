@@ -1,0 +1,20 @@
+<!doctype html><meta charset="utf-8"><title>chart visual test</title>
+<style>body{font-family:sans-serif;background:#eee}canvas{display:block;margin:10px;background:#fff;width:980px}</style>
+<div id="o"></div>
+<script src="../js/chart.js"></script>
+<script>
+function v(x){return x==null?null:{raw:String(x),num:typeof x==='number'?x:null,kind:typeof x==='number'?'num':(x==='ND'?'nd':'lt')};}
+function cats(n,f){var a=[];for(var i=0;i<n;i++)a.push(f(i));return a;}
+var specs=[
+ {kind:'station',station:'測站A (虛構路與圍牆交界)',title:'Leq',unit:'dB(A)',cats:cats(30,function(i){return '114.'+String(1+i%12).padStart(2,'0')+'.08';}),series:[{name:'a',values:cats(30,function(i){return v(55+i%7+(i==5?20:0));})}],stdLines:[{v:67,label:'標準值'}]},
+ {kind:'station',station:'虛構社區',title:'均能音量 日間',unit:'dB(A)',cats:cats(20,function(i){return '112/0'+(1+i%9)+'/17('+(i%2?'施工中 平日':'施工中 假日')+')';}),series:[{name:'a',values:cats(20,function(i){return v(66+i%5);})}],stdLines:[{v:76}]},
+ {kind:'item',title:'PM10 日平均值',unit:'μg/m3',cats:cats(15,function(i){return '114.'+String(1+i%12).padStart(2,'0');}),series:['甲站','乙站','丙站','丁站','虛構科技大學(原虛構學院)','戊站','測站七號比較長的名稱','第八站'].map(function(n,k){return {name:n,values:cats(15,function(i){return v(30+((i*7+k*13)%60));})};}),stdLines:[{v:75}]},
+ {kind:'station',station:'放流口',title:'pH值',unit:'',cats:cats(12,function(i){return '115.0'+(1+i%9)+'.11';}),series:[{name:'a',values:cats(12,function(i){return v(7+i%3*0.4);})}],stdLines:[{v:6},{v:9}]},
+ {kind:'station',station:'放流口',title:'鉛',unit:'mg/L',cats:cats(8,function(i){return '114.1'+(i%3)+'.09';}),series:[{name:'a',values:[v('ND'),v('<0.005'),v(0.012),v('ND'),v(0.02),v('<0.010'),v(0.8),v('ND')]}],stdLines:[{v:1}]},
+ {kind:'station',station:'一個非常非常長的測站名稱用來測試標題會不會被截斷或超出畫面範圍的情形',title:'一氧化碳 最大小時平均值（這是很長的測項名稱）',unit:'ppm',cats:['115.05.11'],series:[{name:'a',values:[v(0.4)]}],stdLines:[{v:35}]},
+ {kind:'station',station:'高值測站',title:'TSP 24小時值',unit:'μg/m3',cats:cats(10,function(i){return '114.0'+(i%9+1)+'.24~25';}),series:[{name:'a',values:cats(10,function(i){return v(i%2?260:240);})}],stdLines:[{v:250},{v:100}]},
+
+ {kind:'station',station:'戊站',title:'PM10 日平均值',unit:'μg/m3',cats:cats(12,function(i){return (111+Math.floor(i/4))+'.0'+(1+(i%4)*3)+'.05';}),series:[{name:'a',values:cats(12,function(i){return {raw:'x',num:40+(i*7)%30,kind:'num'};})}],stdLines:[{v:125,period:'至111.12.31',i0:0,i1:3},{v:100,period:'112.01.01～112.12.31',i0:4,i1:7},{v:75,period:'113.01.01起',i0:8,i1:11}]}
+];
+specs.forEach(function(s,i){var c=document.createElement('canvas');c.id='c'+i;document.getElementById('o').appendChild(c);RTChart.draw(c,s,{scale:2,stationInTitle:true,markND:i===4});});
+</script>

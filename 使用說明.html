@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>使用說明｜監測報告趨勢圖產生器</title>
+<style>
+:root { --ink:#1b2233; --muted:#5d6679; --line:#dde3ee; --accent:#2f6fed; --bg:#eef2f8; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font-family:"Microsoft JhengHei","微軟正黑體","PingFang TC","Noto Sans TC",sans-serif; line-height:1.75; font-size:15.5px; }
+header { background:linear-gradient(135deg,#16213d,#2a3f75); color:#fff; padding:34px 20px 30px; }
+header .w, main { max-width:980px; margin:0 auto; }
+header h1 { margin:0 0 6px; font-size:26px; }
+header p { margin:0; color:#cdd8f5; }
+main { padding:24px 20px 60px; }
+nav.toc { background:#fff; border:1px solid var(--line); border-radius:14px; padding:14px 20px; margin-bottom:20px; }
+nav.toc a { display:inline-block; margin:3px 14px 3px 0; color:var(--accent); text-decoration:none; }
+section { background:#fff; border:1px solid var(--line); border-radius:14px; padding:18px 24px; margin-bottom:18px; }
+h2 { font-size:20px; margin:4px 0 10px; }
+h2 .no { display:inline-grid; place-items:center; width:30px; height:30px; border-radius:9px; background:#2f6fed; color:#fff; font-size:15px; margin-right:8px; }
+h3 { font-size:16.5px; margin:16px 0 4px; }
+.tip { background:#eef4ff; border-left:4px solid var(--accent); padding:8px 14px; border-radius:8px; margin:10px 0; }
+.warn { background:#fff4e0; border-left:4px solid #e39a24; padding:8px 14px; border-radius:8px; margin:10px 0; }
+table { border-collapse:collapse; width:100%; margin:8px 0; font-size:14.5px; }
+th, td { border:1px solid var(--line); padding:6px 10px; text-align:left; vertical-align:top; }
+th { background:#f3f6fb; }
+code { background:#f1f3f8; padding:1px 6px; border-radius:5px; }
+footer { text-align:center; color:var(--muted); font-size:13px; padding:10px 0 30px; }
+</style>
+</head>
+<body>
+<header><div class="w"><h1>監測報告趨勢圖產生器　使用說明</h1><p>匯入月報、季報、年報與檢驗報告，自動整理成報告表格與趨勢長條圖</p></div></header>
+<main>
+<nav class="toc">
+  <a href="#s1">1 計畫管理</a><a href="#s2">2 匯入報告</a><a href="#s3">3 資料檢視</a><a href="#s4">4 資料異常檢查</a><a href="#s5">5 測項與標準值</a><a href="#s6">6 趨勢圖與報告表格</a><a href="#s7">7 環境部資料查詢</a><a href="#s8">8 備份與還原</a><a href="#faq">常見問題</a>
+</nav>
+
+<section id="s0">
+  <h2>先看這裡</h2>
+  <p>一般的使用順序是：<b>建立計畫 → 匯入報告 → 資料異常檢查 → 產生趨勢圖、下載 Excel</b>。</p>
+  <div class="tip">資料只存在這台電腦的瀏覽器裡，不會上傳到網路。換電腦或清除瀏覽器資料之前，請先到「8 備份與還原」下載備份檔。</div>
+</section>
+
+<section id="s1">
+  <h2><span class="no">1</span>計畫管理</h2>
+  <p>輸入計畫編號與名稱後按「建立計畫」。每個計畫的資料、測站名稱對照、標準值、圖表設定都各自獨立，互不影響。左側欄可以切換目前的計畫。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="no">2</span>匯入報告</h2>
+  <p>可以一次選多個檔案，新舊版格式都可以：</p>
+  <table>
+    <tr><th>檔案</th><th>說明</th></tr>
+    <tr><td>Word（.doc、.docx）</td><td>月報、季報、年報。程式會找出每一張「有日期、有數值」的監測結果表；方法、品保、座標等說明表會自動略過。</td></tr>
+    <tr><td>Excel（.xls、.xlsx）</td><td>檢驗室的檢測報告（一份一次採樣），或自己整理的彙整表。不限定哪一家公司的格式，程式會掃描內容找「採樣地點」「監測日期」與測項數值。</td></tr>
+  </table>
+  <div class="warn">掃描成圖片的 PDF 沒有文字，無法判讀。請向檢驗室索取 Word 或 Excel 電子檔。</div>
+  <h3>匯入前確認</h3>
+  <ul>
+    <li>每張表會列出：判讀方式、數值筆數、日期範圍，以及「新增／與既有資料相同／數值不同將覆蓋」的筆數。</li>
+    <li><b>監測類別</b>：程式自動判斷，可以改；判斷不出來時要選好類別才會匯入。也可以新增自己的類別。</li>
+    <li><b>測站名稱</b>：左邊是報告上的寫法，右邊可以改成計畫統一的名稱（例如「測站A (○○路與圍牆交界)」改成「測站A」）。改過一次，之後匯入同樣寫法會自動套用。</li>
+    <li><b>測項</b>：取消勾選的測項不匯入，而且下次同名測項會自動略過（適合檢驗報告裡用不到的「最小小時平均值」等）。也可以改名；常見的英文縮寫與中文（例如 BOD＝生化需氧量、SS＝懸浮固體）會自動對到計畫裡已經有的寫法。</li>
+    <li>報告沒寫測站或日期時，畫面會提醒並讓你填寫。</li>
+    <li>按「預覽判讀結果」可以看整理後的表格，和原報告對照。</li>
+  </ul>
+  <p>確認後按畫面下方的「確認匯入」。同一測站、同一日期、同一測項重複匯入不會重複存；數值不同時以後面的檔案為準，並列入「資料異常檢查」。</p>
+</section>
+
+<section id="s3">
+  <h2><span class="no">3</span>資料檢視</h2>
+  <p>依類別、測站、測項、期間篩選已匯入的資料。數值可以直接點一下修改；勾選後可以「不採用」（圖與報告表格不使用，但保留資料）、恢復採用或刪除；也可以手動新增一筆。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="no">4</span>資料異常檢查</h2>
+  <table>
+    <tr><th>檢查項目</th><th>意思</th></tr>
+    <tr><td>判讀不出的數值</td><td>不是數字、ND 或 &lt;x 的文字（例如打錯字「6O.1」）。</td></tr>
+    <tr><td>異常高低值</td><td>和這個測站歷次數值差很多（至少 6 筆資料才檢查）。請確認是否打錯、單位不同或真的偏高。</td></tr>
+    <tr><td>兩份檔案數值不同</td><td>同一次採樣在兩份報告裡寫的數值不一樣，會列出原本與新的數值和檔名。</td></tr>
+    <tr><td>缺測項</td><td>這次採樣少了這個測站平常都有的測項。</td></tr>
+    <tr><td>名稱很像的測站</td><td>可能是同一站寫法不同（例如「○○國小」與「○○國小外」），可以一鍵合併。</td></tr>
+    <tr><td>單位不一致</td><td>同一測項出現不同單位（例如落塵量改了單位）。</td></tr>
+    <tr><td>超過標準值（提示）</td><td>依採樣日期當時適用的標準值判斷。</td></tr>
+  </table>
+  <p>可以勾選多項後按「確認無誤」（從清單消失），或「不採用」；也可以直接修改數值。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="no">5</span>測項與標準值</h2>
+  <ul>
+    <li>匯入時會從報告的「標準值／管制標準／法規值」自動帶入。自己改過的標準值，之後匯入不會被覆蓋。</li>
+    <li>寫法：單一值「75」、範圍「6~9」（畫兩條線）、多個值「35/38」。</li>
+    <li><b>適用期間</b>：標準值改過（例如 113 年 9 月 30 日加嚴，或每年加嚴），就為同一測項設多筆、各自填「起」「迄」日期（例：113.09.30；空白＝不限）。趨勢圖上每條線只畫在自己的期間。報告上寫「113年9月30日前適用」「113年9月30日後適用」會自動讀成兩個期間。</li>
+    <li>不同測站可以有不同的標準（例如不同噪音管制區）。</li>
+    <li>下方「測項名稱與單位」可以改測項名稱與單位，會套用到這個類別所有資料。</li>
+  </ul>
+</section>
+
+<section id="s6">
+  <h2><span class="no">6</span>趨勢圖與報告表格</h2>
+  <ol>
+    <li>選監測類別與期間（「快速選擇」可以直接選季別或年度）。</li>
+    <li>選圖的樣式：
+      <ul><li><b>每個測站、每個測項各一張</b>（按測站區分）。</li><li><b>每個測項一張，各測站並列</b>（按測項區分，不同顏色代表不同測站）。</li></ul></li>
+    <li>X 軸可以用報告上的日期寫法、統一成 YYY.MM.DD，或只寫年月。</li>
+    <li>勾選要畫的測站與測項，按「產生趨勢圖」。</li>
+  </ol>
+  <ul>
+    <li><b>ND、&lt;x</b> 不畫長條（資料表照原樣寫）。可勾選「在圖上標出 ND／&lt;x」。</li>
+    <li><b>標準值紅色虛線</b>預設不畫，需要時勾選。</li>
+    <li><b>下載高解析圖</b>：單張或全部（zip）。圖上所有文字都會量過尺寸再排版，不會重疊或被裁切；標準值標籤放不下時會移到圖的上方說明列。</li>
+  </ul>
+  <h3>下載的 Excel 內容</h3>
+  <table>
+    <tr><th>工作表</th><th>內容</th></tr>
+    <tr><td>說明</td><td>計畫、類別、期間與注意事項。</td></tr>
+    <tr><td>報告表格（_季別）</td><td>依季報／年報表格樣式整理：測站、採樣日期、各測項、單位、標準值。可以依每季、每月或整段期間分頁，直接複製貼到報告。數值保留報告上的小數位數。</td></tr>
+    <tr><td>圖_測站名（或 圖_測項名）</td><td>每張圖的資料與 Excel 原生長條圖，可以直接改數值、改圖的樣式。</td></tr>
+  </table>
+  <h3>在 Excel 裡修改標準值</h3>
+  <p>有勾選畫標準值時，每張圖的資料下方有「標準值設定表」：<b>起日、迄日、標準值</b>。改數字或日期，圖上的紅線會跟著變；有新的標準值（例如隔年又加嚴），填在預留的空白列，圖上就會多一條只畫在該期間的線。日期請用西元（例：2024/09/30）。</p>
+</section>
+
+<section id="s7">
+  <h2><span class="no">7</span>環境部資料查詢（不分計畫）</h2>
+  <ul>
+    <li><b>空氣品質（月值）</b>：環境部各空品測站每月平均值。Excel 可以另加「季平均」（把該季的月值做算術平均，僅供參考，不是環境部公告值）。</li>
+    <li><b>河川水質</b>：環境部河川測點的監測資料（約每月一次）。</li>
+    <li>用縣市與關鍵字找測站，勾選測站、選起訖年月後按「查詢」，再下載 Excel 或原始資料 CSV。一次最多 30 個測站。</li>
+  </ul>
+  <div class="tip">若環境部網址變更而查不到，請找 AI 協助修改程式（維護說明寫在程式的 README.md 裡，AI 會自己找到）。</div>
+</section>
+
+<section id="s8">
+  <h2><span class="no">8</span>備份與還原</h2>
+  <p>可以下載目前計畫或全部計畫的備份檔（.json），在另一台電腦用「從備份檔還原」匯入。「申請持久保存」可以避免瀏覽器自動清除資料。</p>
+</section>
+
+<section id="faq">
+  <h2>常見問題</h2>
+  <h3>判讀出來的測項名稱很長或不好看？</h3>
+  <p>在匯入確認畫面直接改名，下次會自動套用；已匯入的可以到「5 測項與標準值」改名。</p>
+  <h3>某張表判讀錯了？</h3>
+  <p>取消勾選那張表不要匯入，或匯入後到「3 資料檢視」修改、刪除。若同一家檢驗室的格式一直判讀不好，可以把檔案（去掉敏感資料）交給 AI 協助調整判讀規則。</p>
+  <h3>下載的檔名是英文或亂碼？</h3>
+  <p>請使用最新版的 Chrome 或 Edge。</p>
+</section>
+<footer>監測報告趨勢圖產生器 v1.0.1（2026-09-23）</footer>
+</main>
+</body>
+</html>
