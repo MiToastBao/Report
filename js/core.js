@@ -35,7 +35,23 @@
 
   /* ---------- 標準值 ---------- */
   // 某測站某測項的標準值（可有多筆不同適用期間）；有指定測站的優先於「全部測站」
-  function inRange(iso, s) { return (!s.from || iso >= s.from) && (!s.to || iso <= s.to); }
+  // 適用期間（起訖日）＋適用月份（m1～m2，可跨年，例如 10～4 月）
+  function inMonths(iso, s) {
+    if (!s.m1 || !s.m2 || !iso) return true;
+    var m = +iso.slice(5, 7);
+    return s.m1 <= s.m2 ? m >= s.m1 && m <= s.m2 : m >= s.m1 || m <= s.m2;
+  }
+  function inRange(iso, s) { return (!s.from || iso >= s.from) && (!s.to || iso <= s.to) && inMonths(iso, s); }
+  function monthNote(s) { return s.m1 && s.m2 ? s.m1 + '～' + (s.m2 < s.m1 ? '翌年' : '') + s.m2 + '月' : ''; }
+  function stdJudge(v, s) {
+    var ls = (s.lines || []).slice().sort(function (a, b) { return a - b; });
+    if (!ls.length || v == null) return false;
+    var mode = s.mode || (ls.length >= 2 && /[~～至]/.test(s.text || '') ? 'range' : 'max');
+    if (mode === 'range') return v < ls[0] || v > ls[ls.length - 1];
+    if (mode === 'min') return v < ls[0];
+    return v > ls[ls.length - 1];
+  }
+  function stdLabel(s) { var p = periodNote(s); return (s.text || (s.lines || []).join('~')) + (p ? '（' + p + '）' : ''); }
   function stdsFor(stds, cat, st, item, iso) {
     var a = [], b = [];
     for (var i = 0; i < stds.length; i++) {
@@ -48,7 +64,10 @@
   }
   function stdFor(stds, cat, st, item, iso) { return stdsFor(stds, cat, st, item, iso)[0] || null; }
   function periodNote(s) {
-    if (!s.from && !s.to) return '';
+    if (!s.from && !s.to) return monthNote(s);
+    return periodNote0(s) + (monthNote(s) ? '，' + monthNote(s) : '');
+  }
+  function periodNote0(s) {
     if (s.from && s.to) return rocDate(s.from) + '～' + rocDate(s.to);
     return s.from ? rocDate(s.from) + '起' : '至' + rocDate(s.to);
   }
@@ -93,18 +112,27 @@
     function stdLinesOf(st, item) {
       var out = [];
       stdsFor(stds, cat, st, item).forEach(function (s) {
-        s.lines.forEach(function (v) { out.push({ v: v, label: s.label || '標準值', text: s.text, from: s.from || '', to: s.to || '', period: periodNote(s) }); });
+        s.lines.forEach(function (v) { out.push({ v: v, label: s.label || '標準值', text: s.text, from: s.from || '', to: s.to || '', m1: s.m1 || 0, m2: s.m2 || 0, period: periodNote(s) }); });
       });
       return out;
     }
     // 標準線的範圍：只涵蓋適用期間內的採樣（i0～i1）；完全不在期間內就不畫
+    // 有適用月份（季節性）時可能分成好幾段：每段一個物件，同一標準共用 grp，只有最長的那段標文字（lead）
+    var grpSeq = 0;
     function spanOf(ln, isos) {
-      var i0 = -1, i1 = -1;
-      isos.forEach(function (iso, i) { if (iso && inRange(iso, ln)) { if (i0 < 0) i0 = i; i1 = i; } });
-      if (i0 < 0) return null;
-      ln.i0 = i0; ln.i1 = i1; ln.full = i0 === 0 && i1 === isos.length - 1 && isos.every(function (x) { return !x || inRange(x, ln); });
-      return ln;
+      var segs = [], cur = null;
+      isos.forEach(function (iso, i) {
+        var ok = iso ? inRange(iso, ln) : !!cur; // 沒有日期的分類沿用前一個
+        if (ok) { if (!cur) { cur = { i0: i, i1: i }; segs.push(cur); } else cur.i1 = i; } else cur = null;
+      });
+      if (!segs.length) return [];
+      var g = ++grpSeq, best = 0;
+      segs.forEach(function (sg, k) { if (sg.i1 - sg.i0 > segs[best].i1 - segs[best].i0) best = k; });
+      return segs.map(function (sg, k) {
+        return Object.assign({}, ln, { i0: sg.i0, i1: sg.i1, grp: g, lead: k === best, first: k === 0, full: segs.length === 1 && sg.i0 === 0 && sg.i1 === isos.length - 1 });
+      });
     }
+    function spans(lines, isos) { var out = []; lines.forEach(function (ln) { out = out.concat(spanOf(ln, isos)); }); return out; }
     if (o.mode === 'item') {
       o.items.forEach(function (item) {
         var rs = list.filter(function (r) { return r.item === item; });
@@ -130,14 +158,14 @@
         var lines = [], seen = {};
         series.forEach(function (s) {
           stdLinesOf(s.name, item).forEach(function (ln) {
-            var key = ln.v + '|' + ln.from + '|' + ln.to;
+            var key = ln.v + '|' + ln.from + '|' + ln.to + '|' + ln.m1 + '-' + ln.m2;
             if (!seen[key]) { seen[key] = Object.assign({}, ln, { sts: [] }); lines.push(seen[key]); }
             seen[key].sts.push(s.name);
           });
         });
         lines.forEach(function (ln) { if (ln.sts.length < series.length && series.length > 1) ln.suffix = '（' + ln.sts.join('、') + '）'; });
         var catIsos = cats.map(function (c) { return catsIso[c]; });
-        lines = lines.map(function (ln) { return spanOf(ln, catIsos); }).filter(Boolean);
+        lines = spans(lines, catIsos);
         charts.push({ kind: 'item', title: item, item: item, unit: units[item] || '', cats: cats, series: series, stdLines: lines, cat: cat });
       });
     } else {
@@ -156,7 +184,7 @@
             vals.push({ raw: r.raw, num: pv.num, kind: pv.kind, iso: r.iso });
           });
           var isos = vals.map(function (v) { return v.iso; });
-          var sl = stdLinesOf(st, item).map(function (ln) { return spanOf(ln, isos); }).filter(Boolean);
+          var sl = spans(stdLinesOf(st, item), isos);
           charts.push({ kind: 'station', title: item, station: st, item: item, unit: units[item] || '', cats: cats, series: [{ name: st, values: vals }], stdLines: sl, cat: cat });
         });
       });
@@ -292,9 +320,7 @@
         if (r.excl || textItems[r.item]) return;
         var v = valOf(r.raw).num, s = stdFor(stds, cat, r.st, r.item, r.iso);
         if (v == null || !s || !s.lines || !s.lines.length) return;
-        var lines = s.lines.slice().sort(function (a, b) { return a - b; });
-        var over = lines.length >= 2 ? (v < lines[0] || v > lines[lines.length - 1]) : v > lines[0];
-        if (over) add({ id: 'std|' + r.k + '|' + r.raw, type: 'over', level: 'info', cat: cat, k: r.k, rec: r, msg: '超過標準值 ' + (s.text || lines.join('~')) });
+        if (stdJudge(v, s)) add({ id: 'std|' + r.k + '|' + r.raw, type: 'over', level: 'info', cat: cat, k: r.k, rec: r, msg: ((s.mode === 'min') ? '低於標準值 ' : (s.mode === 'range' || (!s.mode && s.lines.length >= 2)) ? '超出標準範圍 ' : '超過標準值 ') + stdLabel(s) });
       });
     });
     // 7. 匯入時數值不同而被覆蓋
@@ -304,5 +330,5 @@
     return out;
   }
 
-  return { rocDate: rocDate, rocMonth: rocMonth, rocY: rocY, quarterOf: quarterOf, inPeriod: inPeriod, stdFor: stdFor, stdsFor: stdsFor, periodNote: periodNote, catalog: catalog, buildCharts: buildCharts, reportTables: reportTables, anomalies: anomalies, isTextItem: isTextItem, labelOf: labelOf, nameKey: nameKey };
+  return { rocDate: rocDate, rocMonth: rocMonth, rocY: rocY, quarterOf: quarterOf, inPeriod: inPeriod, stdFor: stdFor, stdsFor: stdsFor, periodNote: periodNote, monthNote: monthNote, inRange: inRange, stdJudge: stdJudge, stdLabel: stdLabel, catalog: catalog, buildCharts: buildCharts, reportTables: reportTables, anomalies: anomalies, isTextItem: isTextItem, labelOf: labelOf, nameKey: nameKey };
 });

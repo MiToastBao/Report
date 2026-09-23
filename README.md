@@ -30,8 +30,9 @@
    - 空品測站 `AQX_P_07`；河川水質 `WQX_P_01`：https://data.moenv.gov.tw/dataset/detail/WQX_P_01 ；河川測點 `WQX_P_06`
    - API：`https://data.moenv.gov.tw/api/v2/{資料集}?format=json&limit=1000&offset=0&api_key={KEY}&filters=欄位,GR,值|欄位,LT,值`（GR＝大於等於、LT＝小於，`|` 送出時編成 `%7C`）
    - 金鑰是環境部操作手冊的範例金鑰；失效時到環境部開放平臺申請後換掉 `CONFIG.KEY`。
+   - 測站下拉選單用測站清單的欄位分層：空品 `areaname`（空品區）→ `county` → 測站；河川 `county` → `river` → 測站。欄位名稱變了就改 `airSites`／`riverSites` 的對應。
    - 一次查太多會被環境部暫時封鎖（HTTP 429／500），`CONFIG.DELAY_MS` 控制請求間隔；畫面限制一次最多 30 站。
-2. **某家檢驗室的報告判讀不出來**：先用 `tests/` 的方式把那張表的格線（`RTDoc.readFile` 的輸出）做成虛構資料測試，再改 `js/extract.js`。判讀規則都寫在程式註解裡；不要為單一公司寫死欄位位置。
+2. **某家檢驗室的報告判讀不出來**：Excel 只讀列印範圍（`_xlnm.Print_Area`），隱藏工作表與隱藏列欄不讀（`js/docread.js` 的 `readSheetBook`）。先用 `tests/` 的方式把那張表的格線（`RTDoc.readFile` 的輸出）做成虛構資料測試，再改 `js/extract.js`。判讀規則都寫在程式註解裡；不要為單一公司寫死欄位位置。
 3. **同義測項**（例如 BOD＝生化需氧量）：`js/app.js` 的 `SYN`。匯入時若計畫裡已有同義名稱，會自動對到既有名稱。
 4. **每次修改**：跑 `node --test tests/unit.test.js`；更新 `js/version.js`、`CHANGELOG.md`、`使用說明.html` 頁尾，以及 `index.html` 所有 `?v=` 參數。
 5. **不要把真實監測資料放進 repository**（測試一律用虛構資料）。
@@ -39,8 +40,8 @@
 ## 資料模型（IndexedDB `rtg-v1`）
 
 - `projects`：`{id, code, name, created}`
-- `recs`：鍵 `pid|類別|測站|日期|備註|測項` → `{raw（報告原樣文字，例如 ND、<0.005）, dl（報告上的日期寫法）, unit, src（來源檔名）, excl（不採用）}`；同鍵重複匯入＝覆蓋，數值不同會記入 `meta.conflicts` 供異常檢查。
-- `stds`：鍵 `pid|類別|測站|測項[|起~迄]` → `{text, lines（畫線數值）, from, to（適用期間，空＝不限）, by: auto（報告帶入）|user（自行設定，之後匯入不覆蓋）}`
+- `recs`：鍵 `pid|類別|測站|日期|備註|測項` → `{raw（報告原樣文字，例如 ND、<0.005）, dl（報告上的日期寫法）, unit, src（來源檔名）, excl（不採用）}`；同鍵重複匯入＝覆蓋，數值不同會記入 `meta.conflicts` 供異常檢查。`bid` 是匯入批次；`pid|undo|批次` 存那次匯入蓋掉的舊資料（`prev`、`prevStd`），供「復原這次匯入」使用，只留最近 30 次。
+- `stds`：鍵 `pid|類別|測站|測項[|起~迄][|m月-月]` → `{text, lines（畫線數值）, mode（max 上限／min 下限／range 範圍）, from, to（適用期間，空＝不限）, m1, m2（適用月份，可跨年，0＝全年）, by: auto（報告帶入）|user（自行設定，之後匯入不覆蓋）, bid（匯入批次）}`
 - `meta`：`pid|m` → 測站／測項別名、略過的測項、已確認的異常、單位、圖表設定、匯入紀錄；`_|airSites`、`_|riverSites` 為環境部測站清單快取（30 天）。
 
 ## 第三方元件注意

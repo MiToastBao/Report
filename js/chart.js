@@ -24,6 +24,7 @@
   function fmt(v, d) { return (Math.round(v * Math.pow(10, d)) / Math.pow(10, d)).toFixed(d); }
   function fmtStd(v) { return String(+v.toPrecision(6)); }
   function yTitleOf(spec) { return spec.unit ? spec.title + ' (' + spec.unit + ')' : spec.title; }
+  function monthTxt(l) { return l.m1 + '～' + (l.m2 < l.m1 ? '翌年' : '') + l.m2 + '月'; }
   function stdText(ln, unit) { return '標準值 ' + fmtStd(ln.v) + (unit ? ' ' + unit : '') + (ln.period ? '（' + ln.period + '）' : '') + (ln.sts && ln.suffix ? ln.suffix : ''); }
 
   function range(spec, o) {
@@ -130,9 +131,9 @@
       L.labels = [];
       var newBand = [];
       stdList.forEach(function (ln) {
-        if (band.indexOf(ln) >= 0) return;
+        if (band.indexOf(ln) >= 0 || ln.lead === false) return; // 季節性標準分成多段時，只在最長的一段標文字
         // 圖內標籤不寫期間（線的位置就代表期間）；放到上方說明列時才寫完整期間
-        var txt = stdText({ v: ln.v, sts: ln.sts, suffix: ln.suffix }, spec.unit), tw = ctx.measureText(txt).width, th = fs.std + 2;
+        var txt = stdText({ v: ln.v, sts: ln.sts, suffix: ln.suffix, period: ln.m1 ? monthTxt(ln) : '' }, spec.unit), tw = ctx.measureText(txt).width, th = fs.std + 2;
         var y = L.y(ln.v);
         var sx0 = L.left + L.slot * (ln.i0 != null ? ln.i0 : 0), sx1 = L.left + L.slot * (ln.i1 != null ? ln.i1 + 1 : n);
         var cands = [];
@@ -161,7 +162,7 @@
       });
       if (!newBand.length) break;
       // 只要有一條放不進圖內，就全部放到上方說明列，比較整齊
-      band = stdList.slice().sort(function (a, b) { return b.v - a.v; });
+      band = stdList.filter(function (l) { return l.lead !== false; }).sort(function (a, b) { return b.v - a.v; });
     }
     var H = L.H;
     canvas.width = Math.round(W * scale); canvas.height = Math.round(H * scale);

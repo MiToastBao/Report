@@ -45,7 +45,7 @@
   var S = {
     open: open,
     recKey: function (r) { return [r.pid, r.cat, r.st, r.iso, r.note || '', r.item].join('|'); },
-    stdKey: function (s) { return [s.pid, s.cat, s.st || '*', s.item].join('|') + (s.from || s.to ? '|' + (s.from || '') + '~' + (s.to || '') : ''); },
+    stdKey: function (s) { return [s.pid, s.cat, s.st || '*', s.item].join('|') + (s.from || s.to ? '|' + (s.from || '') + '~' + (s.to || '') : '') + (s.m1 ? '|m' + s.m1 + '-' + s.m2 : ''); },
     projects: function () { return all('projects').then(function (a) { return a.sort(function (x, y) { return x.created - y.created; }); }); },
     putProject: function (p) { return tx(['projects'], 'readwrite', function (t) { t.objectStore('projects').put(p); }); },
     deleteProject: function (pid) {
@@ -81,6 +81,7 @@
     },
     setMeta: function (pid, name, v) { return tx(['meta'], 'readwrite', function (t) { t.objectStore('meta').put({ k: pid + '|' + name, v: v }); }); },
     allMeta: function () { return all('meta'); },
+    delMeta: function (pid, names) { return tx(['meta'], 'readwrite', function (t) { names.forEach(function (n) { t.objectStore('meta').delete(pid + '|' + n); }); }); },
     exportAll: function (pid) {
       return Promise.all([S.projects(), all('recs'), all('stds'), all('meta')]).then(function (a) {
         var ps = pid ? a[0].filter(function (p) { return p.id === pid; }) : a[0];

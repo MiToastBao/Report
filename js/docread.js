@@ -468,9 +468,24 @@
   function readSheetBook(buf, XLSX, kind) {
     var wb = XLSX.read(u8(buf), { type: 'array', cellDates: false, cellStyles: false, sheetStubs: false });
     var tables = [];
-    wb.SheetNames.forEach(function (name) {
+    // 列印範圍：檢驗報告常在列印範圍外放「後台」輸入區，只有列印範圍內才是紙本報告內容
+    var areas = {};
+    ((wb.Workbook || {}).Names || []).forEach(function (n) {
+      if (!/^_xlnm\.Print_Area$/i.test(n.Name || '') || !n.Ref) return;
+      String(n.Ref).split(/,(?=(?:[^']*'[^']*')*[^']*$)/).forEach(function (part) {
+        var m = /^(?:'?(.*?)'?!)?\$?([A-Z]+)\$?(\d+)(?::\$?([A-Z]+)\$?(\d+))?$/.exec(part.trim());
+        if (!m) return;
+        var sheet = m[1] ? m[1].replace(/''/g, "'") : (n.Sheet != null ? wb.SheetNames[n.Sheet] : null);
+        if (!sheet) return;
+        var rg = XLSX.utils.decode_range(m[2] + m[3] + ':' + (m[4] || m[2]) + (m[5] || m[3]));
+        (areas[sheet] = areas[sheet] || []).push(rg);
+      });
+    });
+    var sheetMeta = (wb.Workbook || {}).Sheets || [];
+    wb.SheetNames.forEach(function (name, si) {
       var ws = wb.Sheets[name];
       if (!ws || !ws['!ref']) return;
+      if (sheetMeta[si] && sheetMeta[si].Hidden) return; // 隱藏的工作表不是報告內容
       var rg = XLSX.utils.decode_range(ws['!ref']);
       var maxR = Math.min(rg.e.r, rg.s.r + 3000), maxC = Math.min(rg.e.c, rg.s.c + 80);
       var grid = [];
@@ -495,6 +510,16 @@
         for (var r2 = m.s.r; r2 <= m.e.r; r2++) for (var c2 = m.s.c; c2 <= m.e.c; c2++) {
           var rr = r2 - rg.s.r, cc = c2 - rg.s.c;
           if (rr < grid.length && cc < grid[rr].length) grid[rr][cc] = v;
+        }
+      });
+      // 列印範圍外、隱藏列／欄的內容清空
+      var pa = areas[name], hr = ws['!rows'] || [], hc = ws['!cols'] || [];
+      grid.forEach(function (row, ri) {
+        var r = rg.s.r + ri;
+        for (var ci = 0; ci < row.length; ci++) {
+          var c = rg.s.c + ci;
+          var inside = !pa || pa.some(function (a) { return r >= a.s.r && r <= a.e.r && c >= a.s.c && c <= a.e.c; });
+          if (!inside || (hr[r] && hr[r].hidden) || (hc[c] && hc[c].hidden)) row[ci] = '';
         }
       });
       // 去掉尾端全空欄

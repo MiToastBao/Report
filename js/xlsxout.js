@@ -8,6 +8,7 @@
 })(typeof self !== 'undefined' ? self : this, function (C, X) {
   'use strict';
   var FONT = { name: 'Microsoft JhengHei', size: 11 };
+  function inMon(iso, l) { if (!l.m1 || !l.m2) return true; var m = +iso.slice(5, 7); return l.m1 <= l.m2 ? m >= l.m1 && m <= l.m2 : m >= l.m1 || m <= l.m2; }
   var BORDER = { top: { style: 'thin', color: { argb: 'FF8A93A6' } }, left: { style: 'thin', color: { argb: 'FF8A93A6' } }, bottom: { style: 'thin', color: { argb: 'FF8A93A6' } }, right: { style: 'thin', color: { argb: 'FF8A93A6' } } };
   var HEAD = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8EDF6' } };
 
@@ -103,7 +104,7 @@
     ws.getCell(1, 1).value = group.title; ws.getCell(1, 1).font = Object.assign({}, FONT, { bold: true, size: 13 });
     var r = 3, maxCols = 2;
     group.charts.forEach(function (s) { maxCols = Math.max(maxCols, s.series.length + 2); });
-    var col0 = Math.max(maxCols + 1, 5);
+    var col0 = Math.max(maxCols + 1, info.std !== false ? 8 : 5); // 標準值設定表用到 A～F 欄，圖放在它右邊
     group.charts.forEach(function (spec) {
       var hr = r, n = spec.cats.length;
       var hc = ws.getCell(hr, 1); hc.value = spec.kind === 'item' ? '採樣日期／測站' : '採樣日期'; styleCell(hc, { bold: true, head: true });
@@ -136,33 +137,39 @@
       if (info.std !== false) {
         // 標準值設定表：一列一個標準值（起日、迄日可空白＝不限），預留兩列可自行新增
         var sr = last + 2;
-        ['標準值起日（西元，空白＝不限）', '標準值迄日（西元，空白＝不限）', '標準值' + (spec.unit ? '（' + spec.unit + '）' : ''), '說明'].forEach(function (h, k) { var c = ws.getCell(sr, k + 1); c.value = h; styleCell(c, { bold: true, head: true }); });
-        var slots = lines.map(function (ln) { return ln; }).concat([null, null]);
+        ['標準值起日（西元，空白＝不限）', '標準值迄日（西元，空白＝不限）', '標準值' + (spec.unit ? '（' + spec.unit + '）' : ''), '適用月份 起（1～12，空白＝全年）', '適用月份 迄（可跨年，例如 10→4）', '說明'].forEach(function (h, k) { var c = ws.getCell(sr, k + 1); c.value = h; styleCell(c, { bold: true, head: true }); });
+        // 同一標準分成多段（季節性）時只列一次；月份條件寫在表裡，Excel 會自己斷開
+        var slots = lines.filter(function (ln) { return ln.first !== false; }).concat([null, null]);
         var helperCol = col0 + (spec.kind === 'item' ? 14 : 12);
         slots.forEach(function (ln, k) {
           var row = sr + 1 + k;
-          var a = ws.getCell(row, 1), b = ws.getCell(row, 2), cv = ws.getCell(row, 3), dsc = ws.getCell(row, 4);
+          var a = ws.getCell(row, 1), b = ws.getCell(row, 2), cv = ws.getCell(row, 3), m1c = ws.getCell(row, 4), m2c = ws.getCell(row, 5), dsc = ws.getCell(row, 6);
           if (ln) {
             if (ln.from) a.value = new Date(ln.from + 'T00:00:00Z');
             if (ln.to) b.value = new Date(ln.to + 'T00:00:00Z');
             cv.value = ln.v;
+            if (ln.m1 && ln.m2) { m1c.value = ln.m1; m2c.value = ln.m2; }
             dsc.value = ln.label && ln.label !== '標準值' ? ln.label : '';
           }
           a.numFmt = 'yyyy/mm/dd'; b.numFmt = 'yyyy/mm/dd';
-          styleCell(a); styleCell(b); styleCell(cv, { color: 'FFE03131', bold: true }); styleCell(dsc, { left: true });
+          styleCell(a); styleCell(b); styleCell(cv, { color: 'FFE03131', bold: true }); styleCell(m1c); styleCell(m2c); styleCell(dsc, { left: true });
           // 隱藏的繪圖用儲存格：名稱與每個採樣日期的標準值（不在期間內＝#N/A，不畫線）
           var unitTxt = spec.unit ? ' ' + spec.unit.replace(/"/g, '""') : '';
           var txt = ln ? C.stdText(ln, spec.unit) : '';
           var nameCell = ws.getCell(row, helperCol);
           var A = '$A$' + row, B = '$B$' + row;
           function roc(X) { return '(YEAR(' + X + ')-1911)&TEXT(' + X + ',".mm.dd")'; }
-          var per = 'IF(AND(' + A + '="",' + B + '=""),"","（"&IF(' + A + '="","至"&' + roc(B) + ',IF(' + B + '="",' + roc(A) + '&"起",' + roc(A) + '&"～"&' + roc(B) + '))&"）")';
+          var Dm = '$D$' + row, Em = '$E$' + row, noM = 'OR(' + Dm + '="",' + Em + '="")', noD = 'AND(' + A + '="",' + B + '="")';
+          var core = 'IF(' + noD + ',"",IF(' + A + '="","至"&' + roc(B) + ',IF(' + B + '="",' + roc(A) + '&"起",' + roc(A) + '&"～"&' + roc(B) + ')))';
+          var mon = 'IF(' + noM + ',"",IF(' + noD + ',"","，")&' + Dm + '&"～"&IF(' + Em + '<' + Dm + ',"翌年","")&' + Em + '&"月")';
+          var per = 'IF(AND(' + noD + ',' + noM + '),"","（"&' + core + '&' + mon + '&"）")';
           nameCell.value = { formula: 'IF($C$' + row + '="","","標準值 "&$C$' + row + '&"' + unitTxt + '"&' + per + ')', result: txt };
           var vals = [];
           for (var i = 0; i < n; i++) {
             var h = ws.getCell(row, helperCol + 1 + i), dref = '$' + colName(dc - 1) + '$' + (hr + 1 + i);
-            var inr = ln && catIso[i] && (!ln.from || catIso[i] >= ln.from) && (!ln.to || catIso[i] <= ln.to);
-            h.value = { formula: 'IF(AND($C$' + row + '<>"",' + dref + '<>"",OR($A$' + row + '="",' + dref + '>=$A$' + row + '),OR($B$' + row + '="",' + dref + '<=$B$' + row + ')),$C$' + row + ',NA())', result: inr ? ln.v : { error: '#N/A' } };
+            var inr = ln && catIso[i] && (!ln.from || catIso[i] >= ln.from) && (!ln.to || catIso[i] <= ln.to) && inMon(catIso[i], ln);
+            var mOk = 'OR(' + Dm + '="",' + Em + '="",IF(' + Dm + '<=' + Em + ',AND(MONTH(' + dref + ')>=' + Dm + ',MONTH(' + dref + ')<=' + Em + '),OR(MONTH(' + dref + ')>=' + Dm + ',MONTH(' + dref + ')<=' + Em + ')))';
+            h.value = { formula: 'IF(AND($C$' + row + '<>"",' + dref + '<>"",OR($A$' + row + '="",' + dref + '>=$A$' + row + '),OR($B$' + row + '="",' + dref + '<=$B$' + row + '),' + mOk + '),$C$' + row + ',NA())', result: inr ? ln.v : { error: '#N/A' } };
             vals.push(inr ? ln.v : null);
           }
           stdSeries.push({ name: txt, spare: !ln, vals: vals, nameRef: qs(name) + '!$' + colName(helperCol - 1) + '$' + row, valRef: qs(name) + '!$' + colName(helperCol) + '$' + row + ':$' + colName(helperCol - 1 + n) + '$' + row });
@@ -170,8 +177,9 @@
         for (var hcI = 0; hcI <= n; hcI++) ws.getColumn(helperCol + hcI).hidden = true;
         endRow = sr + slots.length + 1;
         var note = ws.getCell(endRow, 1);
-        note.value = '↑ 標準值可修改數值與適用期間；有新的標準值（例如每年加嚴）就填在空白列，圖上會自動多一條只畫在該期間的紅色虛線。';
+        note.value = '↑ 標準值可修改數值、適用期間與適用月份（季節性標準，例如水溫 5～9 月 38、10～翌年 4 月 35）；有新的標準值（例如每年加嚴）就填在空白列，圖上會自動多一條只畫在該期間的紅色虛線。';
         note.font = Object.assign({}, FONT, { size: 9, color: { argb: 'FF5B6477' } });
+        ws.mergeCells(endRow, 1, endRow, 6); note.alignment = { wrapText: true, vertical: 'top' }; ws.getRow(endRow).height = 30; // 不要延伸到圖的下面
         endRow++;
       }
       var chartRows = spec.kind === 'item' ? 22 : 18;
@@ -180,6 +188,7 @@
     });
     ws.getColumn(1).width = 22; ws.getColumn(2).width = 22; ws.getColumn(3).width = 16; ws.getColumn(4).width = 16;
     for (var j = 5; j <= maxCols; j++) ws.getColumn(j).width = 14;
+    if (info.std !== false) { ws.getColumn(4).width = Math.max(ws.getColumn(4).width || 0, 17); ws.getColumn(5).width = Math.max(ws.getColumn(5).width || 0, 17); ws.getColumn(6).width = Math.max(ws.getColumn(6).width || 0, 18); }
     return plan;
   }
 

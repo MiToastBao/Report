@@ -54,7 +54,7 @@
 
   function airSites(fetchJson) {
     return fetchAll(fetchJson, CONFIG.AIR_SITES, [], null, 2).then(function (a) {
-      return a.map(function (r) { return { id: String(r.siteid), name: r.sitename, county: r.county || '', type: r.sitetype || '' }; })
+      return a.map(function (r) { return { id: String(r.siteid), name: r.sitename, county: r.county || '', township: r.township || '', area: r.areaname || '', type: r.sitetype || '' }; })
         .filter(function (s) { return s.id && s.name; });
     });
   }
@@ -146,6 +146,17 @@
   }
   function buildWorkbook(ExcelJS, o) {
     // o: {kind:'air'|'river', raw:[], pivot, quarters?, info:[]}
+    // 測項欄交錯淡色底＋細框線，數值置中，避免看錯欄位
+    function band(sh, r0, nCol, c0) {
+      var bd = { style: 'thin', color: { argb: 'FFD5DCE8' } };
+      for (var r = r0; r <= sh.rowCount; r++) for (var c = 1; c <= nCol; c++) {
+        var cell = sh.getRow(r).getCell(c);
+        cell.border = { top: bd, left: bd, bottom: bd, right: bd };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        if (cell.font == null || !cell.font.name) cell.font = F;
+        if (c >= c0 && (c - c0) % 2 === 0) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5FC' } };
+      }
+    }
     var wb = new ExcelJS.Workbook();
     var F = { name: 'Microsoft JhengHei', size: 11 };
     var ws = wb.addWorksheet(o.kind === 'air' ? '月值整理表' : '水質整理表');
@@ -158,6 +169,7 @@
       var row = ws.addRow(base.concat(o.pivot.items.map(function (it) { var v = r.vals[it]; var n = num(v); return n != null ? n : (v == null ? '' : v); })));
       row.eachCell(function (c) { c.font = F; c.alignment = { horizontal: 'center' }; });
     });
+    band(ws, 3, head.length + o.pivot.items.length, head.length + 1);
     ws.views = [{ state: 'frozen', xSplit: head.length, ySplit: 2 }];
     ws.getColumn(1).width = 14; for (var i = 2; i <= head.length; i++) ws.getColumn(i).width = o.kind === 'air' ? 10 : 20;
     for (var j = 0; j < o.pivot.items.length; j++) ws.getColumn(head.length + 1 + j).width = 14;
@@ -166,6 +178,7 @@
       var h2 = qs.addRow(['測站', '季別', '月數'].concat(o.pivot.items));
       h2.eachCell(function (c) { c.font = Object.assign({}, F, { bold: true }); c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8EDF6' } }; c.alignment = { horizontal: 'center', wrapText: true }; });
       o.quarters.forEach(function (q) { var row = qs.addRow([q.st, q.period, q.months].concat(o.pivot.items.map(function (it) { return q.vals[it] != null ? q.vals[it] : ''; }))); row.eachCell(function (c) { c.font = F; c.alignment = { horizontal: 'center' }; }); });
+      band(qs, 2, 3 + o.pivot.items.length, 4);
       qs.addRow([]);
       qs.addRow(['註：季平均是把該季有資料的月值做算術平均（月數欄為實際採用的月份數），不是環境部公告的季值，僅供參考。']).getCell(1).font = Object.assign({}, F, { size: 10, color: { argb: 'FF5B6477' } });
       qs.getColumn(1).width = 14; qs.getColumn(2).width = 10;

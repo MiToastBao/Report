@@ -34,6 +34,7 @@
     Array.prototype.forEach.call(document.querySelectorAll('.nav-item[data-sec]'), function (b) { b.classList.toggle('on', b.getAttribute('data-sec') === sec); });
     $('crumb').textContent = SEC_TITLE[sec][0]; $('secTitle').textContent = SEC_TITLE[sec][1];
     $('importBar').hidden = !(sec === 'import' && pending.length);
+    if (sec === 'import') renderLog();
     if (sec === 'data') renderData();
     if (sec === 'check') renderCheck();
     if (sec === 'std') renderStd();
@@ -51,15 +52,36 @@
   function loadProject(pid) {
     st.pid = pid;
     try { localStorage.setItem('rtg.pid', pid || ''); } catch (e) { /* 私密模式 */ }
-    if (!pid) { st.recs = []; st.stds = []; st.meta = {}; renderHeader(); return Promise.resolve(); }
+    if (!pid) { st.recs = []; st.stds = []; st.meta = {}; renderHeader(); renderLog(); return Promise.resolve(); }
     return Promise.all([S.recs(pid), S.stds(pid), S.getMeta(pid, 'm', {})]).then(function (a) {
       st.recs = a[0]; st.stds = a[1]; st.meta = a[2] || {};
-      ['stAlias', 'itemAlias', 'itemIgnore', 'ok', 'units', 'chartForm'].forEach(function (k) { if (!st.meta[k]) st.meta[k] = {}; });
+      return migrateStds().then(function () {
+      ['stAlias', 'itemAlias', 'itemIgnore', 'itemPicked', 'ok', 'units', 'chartForm'].forEach(function (k) { if (!st.meta[k]) st.meta[k] = {}; });
       if (!st.meta.conflicts) st.meta.conflicts = [];
       if (!st.meta.log) st.meta.log = [];
       renderHeader();
+      renderLog();
       updateBadge();
+      });
     });
+  }
+  // 舊資料補上判定方式；報告帶入的水溫「35/38」拆成季節性兩筆（5～9 月、10～翌年 4 月）
+  function migrateStds() {
+    var put = [], del = [];
+    st.stds.forEach(function (s) {
+      if (s.by === 'auto' && !s.m1) {
+        var v = X.stdSeason(s.text, s.item);
+        if (v) {
+          del.push(s.k);
+          v.forEach(function (x) { var o = Object.assign({}, s, { text: x.text, lines: x.lines, m1: x.m1, m2: x.m2, mode: 'max' }); o.k = S.stdKey(o); put.push(o); });
+          return;
+        }
+      }
+      var md = X.stdMode(s.text || '', s.item);
+      if (!s.mode || (s.by === 'auto' && s.mode !== md && !s.modeFixed)) { s.mode = md; s.modeFixed = 1; put.push(s); }
+    });
+    if (!put.length && !del.length) return Promise.resolve();
+    return S.putStds(put, del).then(function () { return S.stds(st.pid); }).then(function (a) { st.stds = a; });
   }
   function saveMeta() { return S.setMeta(st.pid, 'm', st.meta); }
   function renderHeader() {
@@ -144,6 +166,7 @@
   function canon(name) {
     return String(name || '').toLowerCase().replace(/\s*[(（]([a-z0-9.\-]+)[)）]/g, ' $1').split(/\s+/).filter(Boolean).map(function (t) { return SYN_MAP[t] || t.replace(/[（]/g, '(').replace(/[）]/g, ')'); }).join(' ');
   }
+  function pendingOnly(cat, name) { return !st.recs.some(function (r) { return r.cat === cat && nk(r.item) === nk(name); }); }
   function mapName(cat, kind, name) {
     var al = (kind === 'st' ? st.meta.stAlias : st.meta.itemAlias)[cat] || {};
     if (al[name]) return al[name];
@@ -186,8 +209,10 @@
       else if (cat === '營建低頻噪音' && /營建噪音|Lmax|振動|Lv/i.test(it) && !/低頻/.test(it)) ds.itemCat[it] = '營建噪音振動';
       var ic = ds.itemCat[it];
       ds.itemMap[it] = mapName(ic, 'item', it);
+      // 預設不勾選；只有以前匯入時勾選過（或計畫裡已有）的測項才自動勾選，取消過的保持不勾
       var ign = (st.meta.itemIgnore[ic] || {})[it];
-      ds.itemOn[it] = !ign;
+      var picked = (st.meta.itemPicked[ic] || {})[it] || !!knownNames(ic, 'item')[nk(ds.itemMap[it])] && !pendingOnly(ic, ds.itemMap[it]);
+      ds.itemOn[it] = !ign && !!picked;
     });
   }
   function handleFiles(files) {
@@ -276,6 +301,7 @@
         var warn = [];
         if (!ds.cat) warn.push('無法判斷監測類別，請選擇類別後才會匯入（如果不是監測結果，不用勾選）');
         if (ds.noDate && !ds.dateText) warn.push('找不到監測日期，請在下方填寫採樣日期（例：115.05.11）');
+        if (ds.sel && !ds.items.some(function (it) { return ds.itemOn[it]; })) warn.push('還沒有勾選任何測項，請勾選要匯入的測項（可按「全選」）');
         var noSt = ds.stations.length === 0 || ds.stations.some(function (s) { return !s; });
         return '<div class="ds' + (ds.sel ? '' : ' off') + '" data-f="' + fi + '" data-d="' + di + '">' +
           '<div class="ds-head"><label class="chk"><input type="checkbox" data-k="sel"' + (ds.sel ? ' checked' : '') + '> 匯入</label>' +
@@ -284,15 +310,15 @@
           '<div class="ds-body">' + warn.map(function (w) { return '<div class="warn-box">⚠ ' + esc(w) + '</div>'; }).join('') +
           (ds.noDate ? '<div class="map-row" style="max-width:420px"><span class="from">採樣日期</span><input data-k="date" value="' + esc(ds.dateText) + '" placeholder="例：115.05.11"></div>' : '') +
           '<div class="sec-label">測站名稱（左邊是報告上的寫法，右邊可以改成計畫統一的名稱）</div><div class="map-grid">' +
-          (ds.stations.length ? ds.stations : ['']).map(function (s) { return '<div class="map-row"><span class="from" title="' + esc(s) + '">' + esc(s || '（報告沒寫測站）') + '</span><input data-k="st" data-v="' + esc(s) + '" value="' + esc(ds.stMap[s] || '') + '"' + (s ? '' : ' placeholder="請填測站名稱"') + '></div>'; }).join('') + '</div>' +
+          (ds.stations.length ? ds.stations : ['']).map(function (s) { return '<div class="map-row"><span class="from" title="' + esc(s) + '">' + esc(s || '（報告沒寫測站）') + '</span><textarea class="name-box" rows="' + Math.max(1, Math.ceil(String(ds.stMap[s] || '').length / 14)) + '" data-k="st" data-v="' + esc(s) + '"' + (s ? '' : ' placeholder="請填測站名稱"') + '>' + esc(ds.stMap[s] || '') + '</textarea></div>'; }).join('') + '</div>' +
           (noSt && ds.stations.length ? '' : '') +
-          '<div class="sec-label">測項（取消勾選的測項不匯入，下次同名測項會自動略過）</div><div class="map-grid">' +
+          '<div class="sec-label">測項（勾選要匯入的測項；勾選或不勾選的結果會記住，下次同名測項自動套用）　<button class="btn small" data-allon="1">全選</button> <button class="btn small" data-allon="0">全不選</button></div><div class="map-grid">' +
           ds.items.map(function (it) {
-            return '<div class="map-row"><input type="checkbox" data-k="on" data-v="' + esc(it) + '"' + (ds.itemOn[it] ? ' checked' : '') + '><span class="from" title="' + esc(it) + '">' + esc(it) + (ds.textItems[it] ? ' <span class="pill info">文字</span>' : '') + '</span><input data-k="item" data-v="' + esc(it) + '" value="' + esc(ds.itemMap[it]) + '">' +
+            return '<div class="map-row"><input type="checkbox" data-k="on" data-v="' + esc(it) + '"' + (ds.itemOn[it] ? ' checked' : '') + '><span class="from" title="' + esc(it) + '">' + esc(it) + (ds.textItems[it] ? ' <span class="pill info">文字</span>' : '') + '</span><textarea class="name-box" rows="' + Math.max(1, Math.ceil(String(ds.itemMap[it]).length / 12)) + '" data-k="item" data-v="' + esc(it) + '">' + esc(ds.itemMap[it]) + '</textarea>' +
               (ds.itemCat[it] !== ds.cat ? catSelect(ds.itemCat[it], 'data-k="icat" data-v="' + esc(it) + '"') : '') + '</div>';
           }).join('') + '</div>' +
           (ds.stds.length ? '<div class="sec-label">報告上的標準值（匯入後可在「測項與標準值」修改）</div><div class="small muted">' + ds.stds.slice(0, 12).map(function (s) { return esc((s.st === '*' ? '' : (ds.stMap[s.st] || s.st) + '：') + (ds.itemMap[s.item] || s.item) + ' ' + s.text); }).join('；') + (ds.stds.length > 12 ? '…' : '') + '</div>' : '') +
-          '<details class="preview"><summary>預覽判讀結果</summary>' + previewTable(ds) + '</details>' +
+          '<details class="preview" data-pv="1"><summary>預覽判讀結果</summary><div class="pv-body"></div></details>' +
           '</div></div>';
       }).join('') + '</div>';
     }).join('');
@@ -314,8 +340,22 @@
   }
   $('importArea').addEventListener('click', function (e) {
     var b = e.target.closest('[data-rmfile]');
-    if (b) { pending.splice(+b.getAttribute('data-rmfile'), 1); renderImport(); }
+    if (b) { pending.splice(+b.getAttribute('data-rmfile'), 1); renderImport(); return; }
+    var a = e.target.closest('[data-allon]');
+    if (a) {
+      var box = a.closest('.ds'), ds = pending[+box.getAttribute('data-f')].datasets[+box.getAttribute('data-d')];
+      var on = a.getAttribute('data-allon') === '1';
+      ds.items.forEach(function (it) { ds.itemOn[it] = on; });
+      renderImport();
+    }
   });
+  // 預覽表格打開時才產生（表格多的時候畫面才不會變慢）
+  $('importArea').addEventListener('toggle', function (e) {
+    var d = e.target; if (!d.open || !d.hasAttribute('data-pv')) return;
+    var box = d.closest('.ds'), ds = pending[+box.getAttribute('data-f')].datasets[+box.getAttribute('data-d')];
+    d.querySelector('.pv-body').innerHTML = previewTable(ds);
+  }, true);
+  $('importArea').addEventListener('keydown', function (e) { if (e.key === 'Enter' && e.target.classList.contains('name-box')) { e.preventDefault(); e.target.blur(); } });
   $('importArea').addEventListener('change', function (e) {
     var el = e.target, box = el.closest('.ds'); if (!box) return;
     var ds = pending[+box.getAttribute('data-f')].datasets[+box.getAttribute('data-d')];
@@ -344,6 +384,7 @@
   $('importClear').addEventListener('click', function () { if (confirm('清除這批尚未匯入的檔案？')) { pending = []; renderImport(); } });
   $('importGo').addEventListener('click', function () {
     var idx = existingIndex(), put = [], conflicts = [], stdsPut = [], seen = {};
+    var bid = 'b' + Date.now(), prev = {}, prevStd = {}, perFile = {};
     var stdIdx = {}; st.stds.forEach(function (s) { stdIdx[s.k] = s; });
     pending.forEach(function (f) {
       f.datasets.forEach(function (ds) {
@@ -352,8 +393,8 @@
           var e = idx[r.k];
           if (e && e.raw === r.raw) return;
           if (seen[r.k] && seen[r.k].raw === r.raw) return;
-          if (e) { conflicts.push({ k: r.k, cat: r.cat, old: e.raw, oldSrc: e.src, raw: r.raw, src: r.src, at: Date.now() }); r.excl = e.excl; }
-          seen[r.k] = r; put.push(r);
+          if (e) { conflicts.push({ k: r.k, cat: r.cat, old: e.raw, oldSrc: e.src, raw: r.raw, src: r.src, at: Date.now(), bid: bid }); r.excl = e.excl; if (!prev[r.k]) prev[r.k] = e; }
+          r.bid = bid; seen[r.k] = r; put.push(r);
         });
         // 別名、略過的測項
         ds.stations.forEach(function (s) { if (s && ds.stMap[s] && ds.stMap[s] !== s) { (st.meta.stAlias[ds.cat] = st.meta.stAlias[ds.cat] || {})[s] = ds.stMap[s]; } });
@@ -361,7 +402,8 @@
           var ic = ds.itemCat[it] || ds.cat; if (!ic) return;
           if (ds.itemMap[it] && ds.itemMap[it] !== it) (st.meta.itemAlias[ic] = st.meta.itemAlias[ic] || {})[it] = ds.itemMap[it];
           var ig = st.meta.itemIgnore[ic] = st.meta.itemIgnore[ic] || {};
-          if (!ds.itemOn[it]) ig[it] = 1; else delete ig[it];
+          var pk = st.meta.itemPicked[ic] = st.meta.itemPicked[ic] || {};
+          if (!ds.itemOn[it]) { ig[it] = 1; delete pk[it]; } else { delete ig[it]; pk[it] = 1; }
         });
         // 標準值（使用者改過的不覆蓋）
         // 報告上的「全部測站」只代表這張表裡的測站（不同表可能是不同海域分類、管制區），所以逐站存
@@ -371,29 +413,105 @@
           if (!ds.itemOn[s.item]) return;
           var ic = ds.itemCat[s.item] || ds.cat; if (!ic) return;
           var targets = s.st === '*' ? dsSts : [ds.stMap[s.st] || s.st];
+          var itName = ds.itemMap[s.item] || s.item;
+          var variants = X.stdSeason(s.text, itName) || [{ text: s.text, lines: s.lines }];
           targets.forEach(function (stn) {
-            var o = { pid: st.pid, cat: ic, st: stn, item: ds.itemMap[s.item] || s.item, text: s.text, lines: s.lines, label: s.label || '', by: 'auto', from: s.from || '', to: s.to || '' };
-            o.k = S.stdKey(o);
-            var ex = stdIdx[o.k];
-            if (ex && ex.by === 'user') return;
-            stdIdx[o.k] = o; stdsPut.push(o);
+            variants.forEach(function (vv) {
+              var o = { pid: st.pid, cat: ic, st: stn, item: itName, text: vv.text, lines: vv.lines, mode: X.stdMode(vv.text, itName), m1: vv.m1 || 0, m2: vv.m2 || 0, label: s.label || '', by: 'auto', from: s.from || '', to: s.to || '' };
+              o.k = S.stdKey(o);
+              var ex = stdIdx[o.k];
+              if (ex && ex.by === 'user') return;
+              if (ex && ex.bid !== bid && !prevStd[o.k]) prevStd[o.k] = ex;
+              o.bid = bid; stdIdx[o.k] = o; stdsPut.push(o);
+            });
           });
         });
       });
     });
     var byK = {}; put.forEach(function (r) { byK[r.k] = r; }); put = Object.keys(byK).map(function (k) { return byK[k]; });
     st.meta.conflicts = st.meta.conflicts.concat(conflicts).slice(-1000);
-    st.meta.log.push({ at: Date.now(), files: pending.map(function (f) { return f.name; }), n: put.length, conflicts: conflicts.length });
+    put.forEach(function (r) { perFile[r.src] = (perFile[r.src] || 0) + 1; });
+    st.meta.log.push({ id: bid, at: Date.now(), files: pending.map(function (f) { return f.name; }), n: put.length, conflicts: conflicts.length, perFile: perFile });
+    // 復原資料只留最近 30 次匯入
+    var withUndo = st.meta.log.filter(function (l) { return l.id && !l.noUndo; }), drop = withUndo.slice(0, Math.max(0, withUndo.length - 30));
+    drop.forEach(function (l) { l.noUndo = 1; });
     var n = put.length;
-    Promise.all([S.putRecs(put), S.putStds(stdsPut), saveMeta()]).then(function () { return loadProject(st.pid); }).then(function () {
-      pending = []; renderImport();
+    Promise.all([S.putRecs(put), S.putStds(stdsPut), S.setMeta(st.pid, 'undo|' + bid, { prev: prev, prevStd: prevStd }), drop.length ? S.delMeta(st.pid, drop.map(function (l) { return 'undo|' + l.id; })) : null, saveMeta()]).then(function () { return loadProject(st.pid); }).then(function () {
+      pending = []; renderImport(); renderLog();
       $('importArea').innerHTML = '<div class="ok-box">✔ 已匯入 ' + n + ' 筆數值' + (conflicts.length ? '，其中 ' + conflicts.length + ' 筆與既有資料數值不同、已改用新檔（已列入「資料異常檢查」）' : '') + '。可以到「資料異常檢查」確認，或直接到「趨勢圖與報告表格」產生圖表。</div>';
       toast('匯入完成');
     }).catch(function (e) { toast('匯入失敗：' + e.message, true); });
   });
 
+  /* ================= 匯入紀錄：整批復原、刪除某個檔案的資料 ================= */
+  function fmtTime(t) { var d = new Date(t); return d.getFullYear() - 1911 + '/' + p2(d.getMonth() + 1) + '/' + p2(d.getDate()) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes()); }
+  function renderLog() {
+    var card = $('logCard'); if (!card) return;
+    var log = (st.pid && st.meta.log) || [];
+    card.hidden = !log.length;
+    if (!log.length) return;
+    var bySrc = {}, byBid = {};
+    st.recs.forEach(function (r) { bySrc[r.src] = (bySrc[r.src] || 0) + 1; if (r.bid) byBid[r.bid] = (byBid[r.bid] || 0) + 1; });
+    $('logList').innerHTML = log.slice().reverse().slice(0, 60).map(function (l) {
+      var li = log.indexOf(l);
+      var files = uniqArr(l.files || []);
+      var left = l.id ? (byBid[l.id] || 0) : null;
+      var btn = l.undone ? '<span class="tag">已復原（' + esc(fmtTime(l.undone)) + '）</span>'
+        : l.id && left ? '<button class="btn small danger" data-undo="' + li + '">復原這次匯入（' + left + ' 筆）</button>'
+        : l.id ? '<span class="muted small">這次匯入的資料已經都被刪除或被後來的檔案取代</span>' : '<span class="muted small">舊版紀錄，無法整批復原，可逐檔刪除</span>';
+      return '<div class="log-item"><div class="log-head"><b>' + esc(fmtTime(l.at)) + '</b><span class="muted small">匯入 ' + (l.n || 0) + ' 筆' + (l.conflicts ? '（其中 ' + l.conflicts + ' 筆蓋掉舊值）' : '') + '</span><span class="spacer"></span>' + btn + '</div>' +
+        '<div class="log-files">' + files.map(function (f) {
+          var c = bySrc[f] || 0;
+          return '<div class="log-file"><span class="fname">' + esc(f) + '</span><span class="muted small">目前 ' + c + ' 筆</span>' + (c && !l.undone ? '<button class="btn small" data-delsrc="' + esc(f) + '">刪除這個檔案的資料</button>' : '') + '</div>';
+        }).join('') + '</div></div>';
+    }).join('');
+  }
+  function uniqArr(a) { var o = {}; return a.filter(function (x) { if (o[x]) return false; o[x] = 1; return true; }); }
+  // 把資料「退回」：那筆若在匯入時蓋掉舊值，就放回舊值；否則刪除
+  function revertRecs(list) {
+    var bids = uniqArr(list.map(function (r) { return r.bid; }).filter(Boolean));
+    return Promise.all(bids.map(function (b) { return S.getMeta(st.pid, 'undo|' + b, null); })).then(function (us) {
+      var U = {}; bids.forEach(function (b, i) { U[b] = us[i] || { prev: {}, prevStd: {} }; });
+      var put = [], del = [], restored = 0, gone = {};
+      (st.meta.log || []).forEach(function (l) { if (l.undone && l.id) gone[l.id] = 1; });
+      list.forEach(function (r) {
+        var p = r.bid && U[r.bid] && U[r.bid].prev[r.k];
+        if (p && p.bid && gone[p.bid]) p = null; // 舊值來自已經復原的那次匯入，不再放回
+        if (p) { put.push(p); restored++; } else del.push(r.k);
+      });
+      return S.putRecs(put, del).then(function () { return { del: del.length, restored: restored, U: U }; });
+    });
+  }
+  $('logList').addEventListener('click', function (e) {
+    var u = e.target.closest('[data-undo]'), d = e.target.closest('[data-delsrc]');
+    if (u) {
+      var l = st.meta.log[+u.getAttribute('data-undo')]; if (!l) return;
+      var recs = st.recs.filter(function (r) { return r.bid === l.id; });
+      if (!confirm('復原 ' + fmtTime(l.at) + ' 的匯入？\n\n這次匯入的 ' + recs.length + ' 筆資料會刪除；若當時蓋掉了舊值，會把舊值放回去。這次匯入帶進來的標準值也會一併復原（自行修改過的不動）。匯入後在「資料檢視」手動改過的數值也會一起移除。')) return;
+      var stds = st.stds.filter(function (s) { return s.bid === l.id && s.by !== 'user'; });
+      revertRecs(recs).then(function (res) {
+        return S.getMeta(st.pid, 'undo|' + l.id, null).then(function (ud) {
+          var ps = (ud && ud.prevStd) || {}, sPut = [], sDel = [];
+          stds.forEach(function (s) { if (ps[s.k]) sPut.push(ps[s.k]); else sDel.push(s.k); });
+          l.undone = Date.now();
+          st.meta.conflicts = st.meta.conflicts.filter(function (c) { return c.bid !== l.id; });
+          return Promise.all([S.putStds(sPut, sDel), saveMeta()]).then(function () { return res; });
+        });
+      }).then(function (res) { return loadProject(st.pid).then(function () { renderLog(); toast('已復原：刪除 ' + res.del + ' 筆' + (res.restored ? '、放回舊值 ' + res.restored + ' 筆' : '')); }); })
+        .catch(function (err) { toast('復原失敗：' + err.message, true); });
+    } else if (d) {
+      var name = d.getAttribute('data-delsrc');
+      var list = st.recs.filter(function (r) { return r.src === name; });
+      if (!confirm('刪除「' + name + '」匯入的 ' + list.length + ' 筆資料？\n\n若匯入時蓋掉了舊值，會把舊值放回去。標準值不會刪除（可到「測項與標準值」修改）。')) return;
+      revertRecs(list).then(function (res) {
+        st.meta.conflicts = st.meta.conflicts.filter(function (c) { return c.src !== name; });
+        return saveMeta().then(function () { return loadProject(st.pid); }).then(function () { renderLog(); toast('已刪除 ' + res.del + ' 筆' + (res.restored ? '、放回舊值 ' + res.restored + ' 筆' : '')); });
+      }).catch(function (err) { toast('刪除失敗：' + err.message, true); });
+    }
+  });
+
   /* ================= 資料檢視 ================= */
-  var dPage = 0;
+  var dPage = 0, dFiltered = [];
   function periodOptions(sel) {
     var qs = {}, ys = {};
     st.recs.forEach(function (r) { qs[Co.quarterOf(r.iso)] = 1; ys[Co.rocY(r.iso)] = 1; });
@@ -411,7 +529,11 @@
     var cat = $('dCat').value, cats = catsInData();
     $('dCat').innerHTML = opt('', '全部類別', !cat) + cats.map(function (c) { return opt(c, c, c === cat); }).join('');
     var list = st.recs.filter(function (r) { return !cat || r.cat === cat; });
-    var stv = $('dSt').value, itv = $('dItem').value, pv = $('dPeriod').value;
+    var stv = $('dSt').value, itv = $('dItem').value, pv = $('dPeriod').value, srcv = $('dSrc').value;
+    var srcs = uniqArr(st.recs.map(function (r) { return r.src || ''; })).sort();
+    if (srcv && srcs.indexOf(srcv) < 0) srcv = '';
+    $('dSrc').innerHTML = opt('', '全部檔案', !srcv) + srcs.map(function (s) { return opt(s, s || '（未記錄）', s === srcv); }).join('');
+    if (srcv) list = list.filter(function (r) { return (r.src || '') === srcv; });
     var sts = [], its = [];
     list.forEach(function (r) { if (sts.indexOf(r.st) < 0) sts.push(r.st); if (its.indexOf(r.item) < 0) its.push(r.item); });
     $('dSt').innerHTML = opt('', '全部測站', !stv) + sts.map(function (s) { return opt(s, s, s === stv); }).join('');
@@ -422,6 +544,7 @@
     list.sort(function (a, b) { return a.cat < b.cat ? -1 : a.cat > b.cat ? 1 : a.st < b.st ? -1 : a.st > b.st ? 1 : a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : a.item < b.item ? -1 : 1; });
     var per = 400, pages = Math.max(1, Math.ceil(list.length / per));
     if (dPage >= pages) dPage = 0;
+    dFiltered = list;
     var show = list.slice(dPage * per, dPage * per + per);
     $('dCount').innerHTML = '共 ' + list.length + ' 筆' + (pages > 1 ? '・第 <select id="dPg">' + Array.apply(null, Array(pages)).map(function (x, i) { return opt(i, (i + 1) + '／' + pages, i === dPage); }).join('') + '</select> 頁' : '') + '　<span class="small">（數值可直接點一下修改，按 Enter 或移開就會儲存）</span>';
     $('dTable').innerHTML = show.length ? '<table class="t"><thead><tr><th><input type="checkbox" id="dChkAll"></th><th>類別</th><th>測站</th><th>採樣日期</th><th>備註</th><th>測項</th><th>數值</th><th>單位</th><th>來源檔案</th></tr></thead><tbody>' +
@@ -429,7 +552,7 @@
         return '<tr' + (r.excl ? ' class="excl"' : '') + '><td><input type="checkbox" data-k="' + esc(r.k) + '"></td><td>' + esc(r.cat) + '</td><td>' + esc(r.st) + '</td><td>' + esc(r.dl) + '</td><td>' + esc(r.note) + '</td><td>' + esc(r.item) + '</td><td class="num"><input class="cell" data-edit="' + esc(r.k) + '" value="' + esc(r.raw) + '"></td><td>' + esc(r.unit) + '</td><td class="small muted">' + esc(r.src || '') + '</td></tr>';
       }).join('') + '</tbody></table>' : '<div class="empty">沒有符合條件的資料</div>';
   }
-  ['dCat', 'dSt', 'dItem', 'dPeriod'].forEach(function (id) { $(id).addEventListener('change', function () { if (id === 'dCat') { $('dSt').value = ''; $('dItem').value = ''; } dPage = 0; renderData(); }); });
+  ['dCat', 'dSt', 'dItem', 'dPeriod', 'dSrc'].forEach(function (id) { $(id).addEventListener('change', function () { if (id === 'dCat') { $('dSt').value = ''; $('dItem').value = ''; } dPage = 0; renderData(); }); });
   $('dQ').addEventListener('input', function () { dPage = 0; clearTimeout(renderData._t); renderData._t = setTimeout(renderData, 250); });
   $('dCount').addEventListener('change', function (e) { if (e.target.id === 'dPg') { dPage = +e.target.value; renderData(); } });
   $('dTable').addEventListener('change', function (e) {
@@ -451,6 +574,12 @@
     var ks = checkedKeys($('dTable')); if (!ks.length) { toast('請先勾選要刪除的資料', true); return; }
     if (!confirm('刪除勾選的 ' + ks.length + ' 筆資料？無法復原。')) return;
     S.delRecs(ks).then(function () { return loadProject(st.pid); }).then(renderData);
+  });
+  $('dDelAll').addEventListener('click', function () {
+    var ks = dFiltered.map(function (r) { return r.k; }); if (!ks.length) { toast('目前篩選沒有資料', true); return; }
+    var all = ks.length === st.recs.length;
+    if (!confirm((all ? '目前沒有篩選，這會刪除這個計畫的全部 ' : '刪除目前篩選出的全部 ') + ks.length + ' 筆資料（不只這一頁）？無法復原。\n\n若只是某次匯入錯了，建議改用「匯入報告」頁下方的「匯入紀錄」復原，會把被蓋掉的舊值放回去。')) return;
+    S.delRecs(ks).then(function () { return loadProject(st.pid); }).then(function () { renderData(); toast('已刪除 ' + ks.length + ' 筆'); });
   });
   function setExcl(ks, v) {
     var set = {}; ks.forEach(function (k) { set[k] = 1; });
@@ -544,18 +673,21 @@
     var list = st.stds.filter(function (s) { return s.cat === cat; });
     var groups = {}, order = [];
     list.forEach(function (s) {
-      var g = s.item + '\u0001' + (s.from || '') + '\u0001' + (s.to || '') + '\u0001' + s.text;
-      if (!groups[g]) { groups[g] = { item: s.item, text: s.text, lines: s.lines, label: s.label, by: s.by, from: s.from || '', to: s.to || '', keys: [], sts: [] }; order.push(g); }
+      var g = s.item + '\u0001' + (s.from || '') + '\u0001' + (s.to || '') + '\u0001' + (s.m1 || '') + '-' + (s.m2 || '') + '\u0001' + (s.mode || '') + '\u0001' + s.text;
+      if (!groups[g]) { groups[g] = { item: s.item, text: s.text, lines: s.lines, label: s.label, by: s.by, from: s.from || '', to: s.to || '', m1: s.m1 || 0, m2: s.m2 || 0, mode: s.mode || X.stdMode(s.text || '', s.item), keys: [], sts: [] }; order.push(g); }
       groups[g].keys.push(s.k); groups[g].sts.push(s.st === '*' ? '全部測站' : s.st);
       if (s.by === 'user') groups[g].by = 'user';
     });
     order.sort(function (a, b) { return a < b ? -1 : 1; });
     stdGroups = order.map(function (g) { return groups[g]; });
-    $('sTable').innerHTML = stdGroups.length ? '<table class="t"><thead><tr><th>測項</th><th>標準值</th><th>適用期間 起</th><th>適用期間 迄</th><th>畫線數值</th><th>適用測站</th><th>說明</th><th>來源</th><th></th></tr></thead><tbody>' + stdGroups.map(function (g, i) {
-      return '<tr><td>' + esc(g.item) + '</td><td><input class="cell" style="width:110px;text-align:left" data-sg="' + i + '" value="' + esc(g.text) + '"></td>' +
-        '<td><input class="cell" style="width:105px;text-align:left" data-sgf="' + i + '" value="' + esc(g.from ? Co.rocDate(g.from) : '') + '" placeholder="不限"></td><td><input class="cell" style="width:105px;text-align:left" data-sgt="' + i + '" value="' + esc(g.to ? Co.rocDate(g.to) : '') + '" placeholder="不限"></td>' +
-        '<td>' + esc(g.lines.join('、')) + '</td><td style="white-space:normal;max-width:420px">' + esc(g.sts.join('、')) + '</td><td class="small muted" style="white-space:normal;max-width:220px">' + esc(g.label || '') + '</td><td class="small muted">' + (g.by === 'user' ? '自行設定' : '報告帶入') + '</td><td><button class="btn small danger" data-sgdel="' + i + '">刪除</button></td></tr>';
-    }).join('') + '</tbody></table>' : '<div class="empty">這個類別還沒有標準值</div>';
+    $('sBack').hidden = !st.stdFromChart;
+    $('sTable').innerHTML = stdGroups.length ? '<table class="t std-t"><thead><tr><th>測項</th><th>標準值</th><th>判定方式</th><th>適用月份<br><span class="small muted">格式 5-9、10-4<br>空白＝全年</span></th><th>適用期間 起<br><span class="small muted">格式 112.01.01<br>空白＝不限</span></th><th>適用期間 迄<br><span class="small muted">格式 112.12.31<br>空白＝不限</span></th><th>畫線<br>數值</th><th>適用測站</th><th>說明／來源</th><th></th></tr></thead><tbody>' + stdGroups.map(function (g, i) {
+      return '<tr><td>' + esc(g.item) + '</td><td><input class="cell" style="width:100px;text-align:left" data-sg="' + i + '" value="' + esc(g.text) + '"></td>' +
+        '<td><select class="cell" data-sgm="' + i + '">' + MODE_OPTS.map(function (m) { return opt(m[0], m[1], m[0] === g.mode); }).join('') + '</select></td>' +
+        '<td><input class="cell" style="width:92px;text-align:left" list="monthPresets" data-sgmo="' + i + '" value="' + esc(g.m1 ? g.m1 + '-' + g.m2 : '') + '" placeholder="全年" title="格式：5-9（5～9 月）、10-4（10 月～翌年 4 月）；空白＝全年"><div class="small muted">' + esc(Co.monthNote(g)) + '</div></td>' +
+        '<td><input class="cell" style="width:105px;text-align:left" data-sgf="' + i + '" value="' + esc(g.from ? Co.rocDate(g.from) : '') + '" placeholder="不限" title="格式：112.01.01；空白＝不限"></td><td><input class="cell" style="width:105px;text-align:left" data-sgt="' + i + '" value="' + esc(g.to ? Co.rocDate(g.to) : '') + '" placeholder="不限" title="格式：112.12.31；空白＝不限"></td>' +
+        '<td>' + esc(g.lines.join('、')) + '</td><td class="st-cell">' + esc(g.sts.join('、')) + '</td><td class="note-cell">' + (g.label ? esc(g.label) + '<br>' : '') + '<span class="small muted">' + (g.by === 'user' ? '自行設定' : '報告帶入') + '</span></td><td><button class="btn small danger" data-sgdel="' + i + '">刪除</button></td></tr>';
+    }).join('') + '</tbody></table>' : '<div class="empty">這個類別還沒有標準值，按「＋ 新增一筆標準值」設定</div>';
     var units = st.meta.units[cat] || {};
     $('iTable').innerHTML = cg.items.length ? '<table class="t"><thead><tr><th>測項名稱</th><th>改名為</th><th>單位</th><th>筆數</th></tr></thead><tbody>' + cg.items.map(function (it) {
       var n = st.recs.filter(function (r) { return r.cat === cat && r.item === it; }).length;
@@ -565,10 +697,23 @@
   $('sCat').addEventListener('change', renderStd);
   var stdGroups = [];
   $('sTable').addEventListener('change', function (e) {
-    var el = e.target, i = el.getAttribute('data-sg'), fi = el.getAttribute('data-sgf'), ti = el.getAttribute('data-sgt');
-    var idx = i != null ? i : fi != null ? fi : ti; if (idx == null) return;
+    var el = e.target, i = el.getAttribute('data-sg'), fi = el.getAttribute('data-sgf'), ti = el.getAttribute('data-sgt'), mi = el.getAttribute('data-sgm'), moi = el.getAttribute('data-sgmo');
+    var idx = [i, fi, ti, mi, moi].filter(function (x) { return x != null; })[0]; if (idx == null) return;
     var g = stdGroups[+idx], val = el.value.trim();
     var ch = st.stds.filter(function (x) { return g.keys.indexOf(x.k) >= 0; });
+    if (mi != null) {
+      ch.forEach(function (x) { x.mode = val; x.by = 'user'; });
+      S.putStds(ch).then(function () { renderStd(); toast('已更新判定方式'); });
+      return;
+    }
+    if (moi != null) {
+      var mm = parseMonths(val);
+      if (mm === false) { toast('月份看不懂，請寫「5-9」或「10-4」（10 月到翌年 4 月），空白＝全年', true); el.value = g.m1 ? g.m1 + '-' + g.m2 : ''; return; }
+      var delM = ch.map(function (x) { return x.k; });
+      ch.forEach(function (x) { x.m1 = mm ? mm[0] : 0; x.m2 = mm ? mm[1] : 0; x.by = 'user'; x.k = S.stdKey(x); });
+      S.putStds(ch, delM).then(function () { return loadProject(st.pid); }).then(function () { renderStd(); toast('已更新適用月份'); });
+      return;
+    }
     if (fi != null || ti != null) {
       var d = val ? X.parseDate(val) : null;
       if (val && !d) { toast('日期看不懂，請用 113.09.30 這種寫法（空白＝不限）', true); el.value = ''; return; }
@@ -578,7 +723,7 @@
       S.putStds(ch, del).then(function () { return loadProject(st.pid); }).then(function () { renderStd(); toast('已更新適用期間'); });
       return;
     }
-    ch.forEach(function (x) { x.text = val; x.lines = X.stdLines(val); x.by = 'user'; });
+    ch.forEach(function (x) { x.text = val; x.lines = X.stdLines(val); x.by = 'user'; x.mode = X.stdMode(val, x.item); });
     S.putStds(ch).then(function () { renderStd(); toast('已更新 ' + ch.length + ' 個測站的標準值'); });
   });
   $('sTable').addEventListener('click', function (e) {
@@ -586,19 +731,53 @@
     var ks = stdGroups[+i].keys;
     S.putStds([], ks).then(function () { st.stds = st.stds.filter(function (s) { return ks.indexOf(s.k) < 0; }); renderStd(); });
   });
+  var MODE_OPTS = [['max', '上限（不可超過）'], ['min', '下限（不可低於）'], ['range', '範圍（兩值之間）']];
+  function parseMonths(t) {
+    t = String(t || '').trim(); if (!t || t === '全年') return null;
+    var m = /^(\d{1,2})\s*月?\s*[-~～至到－]\s*(?:翌年)?\s*(\d{1,2})\s*月?$/.exec(t);
+    if (!m) return false;
+    var a = +m[1], b = +m[2]; if (a < 1 || a > 12 || b < 1 || b > 12) return false;
+    return [a, b];
+  }
   $('sAdd').addEventListener('click', function () {
     var cat = $('sCat').value; if (!cat) return toast('請先匯入資料', true);
-    var cg = Co.catalog(st.recs, cat, null);
-    var item = prompt('測項名稱（要和資料裡的測項完全相同）\n可用：' + cg.items.join('、'), cg.items[0] || ''); if (!item) return;
-    var stn = prompt('適用測站（留空＝全部測站）\n可用：' + cg.stations.join('、'), ''); if (stn === null) return;
-    var text = prompt('標準值（例：75、6~9）', ''); if (!text) return;
-    var f = prompt('適用期間「起」（例：112.01.01；留空＝不限）', ''); if (f === null) return;
-    var t = prompt('適用期間「迄」（例：112.12.31；留空＝不限）', ''); if (t === null) return;
-    var fd = f.trim() ? X.parseDate(f) : null, td = t.trim() ? X.parseDate(t) : null;
-    if ((f.trim() && !fd) || (t.trim() && !td)) return toast('日期看不懂，請用 112.01.01 這種寫法', true);
-    var o = { pid: st.pid, cat: cat, st: stn.trim() || '*', item: item.trim(), text: text.trim(), lines: X.stdLines(text), label: '', by: 'user', from: fd ? fd.iso : '', to: td ? td.iso : '' };
+    var cg = Co.catalog(st.recs, cat, null), f = $('sAddForm');
+    f.hidden = false;
+    f.innerHTML = '<div class="filters wrap">' +
+      '<label>測項<select id="saItem">' + cg.items.map(function (it) { return opt(it, it); }).join('') + '</select></label>' +
+      '<label>適用測站<select id="saSt">' + opt('*', '全部測站') + cg.stations.map(function (x) { return opt(x, x); }).join('') + '</select></label>' +
+      '<label>標準值<input id="saText" style="width:110px" placeholder="38"></label>' +
+      '<label>判定方式<select id="saMode">' + MODE_OPTS.map(function (m) { return opt(m[0], m[1]); }).join('') + '</select></label>' +
+      '<label>適用月份（空白＝全年）<input id="saMon" list="monthPresets" style="width:120px" placeholder="5-9"></label>' +
+      '<label>適用期間 起（空白＝不限）<input id="saFrom" style="width:130px" placeholder="112.01.01"></label>' +
+      '<label>適用期間 迄（空白＝不限）<input id="saTo" style="width:130px" placeholder="112.12.31"></label>' +
+      '<label class="grow">說明（選填）<input id="saNote" placeholder="例：放流水標準（夏季）"></label>' +
+      '</div><div class="actions"><button class="btn primary" id="saGo" type="button">新增</button><button class="btn" id="saCancel" type="button">取消</button><span class="muted small">季節性標準（例如水溫）請新增兩筆，各填不同的適用月份。</span></div>';
+    $('saText').addEventListener('input', function () { $('saMode').value = X.stdMode(this.value, $('saItem').value); });
+    $('saText').focus();
+  });
+  $('sAddForm').addEventListener('click', function (e) {
+    if (e.target.id === 'saCancel') { $('sAddForm').hidden = true; return; }
+    if (e.target.id !== 'saGo') return;
+    var cat = $('sCat').value, text = $('saText').value.trim();
+    if (!text || !X.stdLines(text).length) return toast('請填標準值數字（例：38 或 6~9）', true);
+    var mm = parseMonths($('saMon').value); if (mm === false) return toast('月份看不懂，請寫「5-9」或「10-4」，空白＝全年', true);
+    var fv = $('saFrom').value.trim(), tv = $('saTo').value.trim();
+    var fd = fv ? X.parseDate(fv) : null, td = tv ? X.parseDate(tv) : null;
+    if ((fv && !fd) || (tv && !td)) return toast('日期看不懂，請用 112.01.01 這種寫法（空白＝不限）', true);
+    if (fd && td && fd.iso > td.iso) return toast('起日不能晚於迄日', true);
+    var o = { pid: st.pid, cat: cat, st: $('saSt').value, item: $('saItem').value, text: text, lines: X.stdLines(text), mode: $('saMode').value, m1: mm ? mm[0] : 0, m2: mm ? mm[1] : 0, label: $('saNote').value.trim(), by: 'user', from: fd ? fd.iso : '', to: td ? td.iso : '' };
     o.k = S.stdKey(o);
-    S.putStds([o]).then(function () { return loadProject(st.pid); }).then(renderStd);
+    S.putStds([o]).then(function () { return loadProject(st.pid); }).then(function () {
+      renderStd(); toast('已新增：' + o.item + ' ' + Co.stdLabel(o));
+      $('saText').value = ''; $('saMon').value = ''; $('saText').focus();
+    });
+  });
+  $('sBack').addEventListener('click', function () { st.stdFromChart = false; go('chart'); });
+  $('gStdEdit').addEventListener('click', function () {
+    if (!needProject()) return;
+    st.stdFromChart = true; go('std');
+    var c = $('gCat').value; if (c) { $('sCat').value = c; renderStd(); }
   });
   $('iTable').addEventListener('change', function (e) {
     var cat = $('sCat').value, from = e.target.getAttribute('data-ren'), uit = e.target.getAttribute('data-unit');
@@ -633,6 +812,8 @@
     var cat = $('gCat').value || f.cat;
     if (cats.indexOf(cat) < 0) cat = cats[0] || '';
     $('gCat').innerHTML = cats.map(function (c) { return opt(c, c, c === cat); }).join('') || '<option value="">（還沒有資料）</option>';
+    var nStd = st.stds.filter(function (x) { return x.cat === cat; }).length;
+    $('gStdPeek').textContent = nStd ? '這個類別有 ' + nStd + ' 筆標準值（可設季節性、分期）' : '這個類別還沒有標準值';
     var ys = yearsInData();
     if (!ys.length) { $('gOut').innerHTML = '<div class="card empty">這個計畫還沒有資料，請先到「匯入報告」匯入檔案</div>'; return; }
     var yOpts = function (sel) { var a = []; for (var y = ys[0] - 1; y <= ys[ys.length - 1] + 1; y++) a.push(opt(y, y + ' 年', y === sel)); return a.join(''); };
@@ -658,6 +839,7 @@
     var prevSts = f.cat === cat && f.sts ? f.sts : null, prevItems = f.cat === cat && f.items ? f.items : null;
     $('gSts').innerHTML = cg.stations.length ? cg.stations.map(function (s) { return '<label class="chk"><input type="checkbox" value="' + esc(s) + '"' + (!prevSts || prevSts.indexOf(s) >= 0 ? ' checked' : '') + '> ' + esc(s) + '</label>'; }).join('') : '<span class="muted">此期間沒有資料</span>';
     $('gItems').innerHTML = cg.items.length ? cg.items.map(function (s) { var t = cg.textItems[s]; return '<label class="chk"' + (t ? ' title="文字資料（例如風向）不畫圖，只列在報告表格"' : '') + '><input type="checkbox" value="' + esc(s) + '"' + ((!prevItems ? !t : prevItems.indexOf(s) >= 0) ? ' checked' : '') + '> ' + esc(s) + (t ? '（文字）' : '') + '</label>'; }).join('') : '<span class="muted">此期間沒有資料</span>';
+    updatePlan();
   }
   function p2(n) { return (n < 10 ? '0' : '') + n; }
   function periodSel() {
@@ -685,9 +867,10 @@
     e.preventDefault();
     var box = $(a.getAttribute('data-all') || a.getAttribute('data-none')), v = a.hasAttribute('data-all');
     Array.prototype.forEach.call(box.querySelectorAll('input[type=checkbox]'), function (c) { c.checked = v; });
-    if (box.id === 'gSts' || box.id === 'gItems') saveForm();
+    if (box.id === 'gSts' || box.id === 'gItems') { saveForm(); updatePlan(); }
   });
-  ['gSts', 'gItems'].forEach(function (id) { $(id).addEventListener('change', saveForm); });
+  ['gSts', 'gItems'].forEach(function (id) { $(id).addEventListener('change', function () { saveForm(); updatePlan(); }); });
+  Array.prototype.forEach.call(document.querySelectorAll('input[name=gMode]'), function (r) { r.addEventListener('change', updatePlan); });
   // 各站並列時，各站採樣日不一定同一天，預設改用「年月」當 X 軸
   Array.prototype.forEach.call(document.querySelectorAll('input[name=gMode]'), function (r) {
     r.addEventListener('change', function () { if (this.value === 'item' && radio('gX') === 'orig') setRadio('gX', 'month'); saveForm(); });
@@ -711,17 +894,74 @@
     var charts = Co.buildCharts(st.recs, st.stds, o);
     lastCharts = charts; lastChartOpts = Object.assign({}, o, { tableItems: items });
     var out = $('gOut');
-    if (!charts.length) { out.innerHTML = '<div class="card empty">這個期間、測站與測項沒有可以畫的資料</div>'; $('gXlsx').disabled = true; $('gPngAll').disabled = true; return; }
+    figOff = {};
+    if (!charts.length) { $('gFilter').hidden = true; out.innerHTML = '<div class="card empty">這個期間、測站與測項沒有可以畫的資料</div>'; $('gXlsx').disabled = true; $('gPngAll').disabled = true; return; }
     out.innerHTML = charts.map(function (c, i) {
       var nd = 0; c.series.forEach(function (s) { s.values.forEach(function (v) { if (v && v.num == null) nd++; }); });
       var title = (c.kind === 'station' ? c.station + '｜' : '') + c.title;
-      return '<div class="fig"><div class="fig-head"><span class="t">' + esc(title) + '</span><button class="btn small" data-png="' + i + '">下載高解析圖</button></div><canvas data-i="' + i + '"></canvas>' +
+      return '<div class="fig" data-fi="' + i + '"><div class="fig-head"><label class="chk fig-pick" title="取消勾選：下載全部圖檔與 Excel 時不包含這張"><input type="checkbox" data-fpick="' + i + '" checked> </label><span class="t">' + esc(title) + '</span><button class="btn small" data-png="' + i + '">下載高解析圖</button></div><canvas data-i="' + i + '"></canvas>' +
         '<div class="note">' + c.cats.length + ' 次採樣' + (nd ? '・' + nd + ' 筆為 ND／&lt;x 等非數值，未畫長條' : '') + (c.stdLines.length ? '' : '・沒有標準值（可在「測項與標準值」設定）') + '</div></div>';
     }).join('');
     Array.prototype.forEach.call(out.querySelectorAll('canvas'), function (cv) { CH.draw(cv, charts[+cv.getAttribute('data-i')], drawOpts(Math.min(2, window.devicePixelRatio || 1))); });
     $('gXlsx').disabled = false; $('gPngAll').disabled = false;
     $('gMsg').textContent = '共 ' + charts.length + ' 張圖';
+    renderFigFilter();
   });
+  /* 產生後的篩選：依測站、測項顯示／隱藏；每張圖可取消勾選。下載全部圖檔與 Excel 圖表只包含「顯示中且勾選」的圖 */
+  /* 產生後的篩選列：直接切換要畫的測站、測項與圖的樣式（等於改上面的勾選並重畫）；每張圖左上角可取消勾選，下載全部圖檔與 Excel 圖表時不含 */
+  var figOff = {};
+  function pickedCharts() { return (lastCharts || []).filter(function (c, i) { return !figOff[i]; }); }
+  function boxVals(id) { return Array.prototype.map.call($(id).querySelectorAll('input[type=checkbox]'), function (c) { return { v: c.value, on: c.checked, text: c.closest('label') && /（文字）/.test(c.closest('label').textContent) }; }); }
+  function renderFigFilter() {
+    var cs = lastCharts || [], md = lastChartOpts && lastChartOpts.mode;
+    var el = $('gFilter'); el.hidden = !cs.length;
+    var chip = function (kind, o) { return '<button type="button" class="fchip' + (o.on ? ' on' : '') + '" data-fk="' + kind + '" data-fv="' + esc(o.v) + '">' + esc(o.v) + '</button>'; };
+    var sts = boxVals('gSts'), its = boxVals('gItems').filter(function (o) { return !o.text; });
+    el.innerHTML = '<div class="ff-title">只看部分的圖：點一下切換，圖會立刻重畫（和上面的勾選同步）</div>' +
+      '<div class="ff-row"><span class="ff-lab">圖的樣式</span><span class="seg"><button type="button" data-fmode="station" class="' + (md === 'station' ? 'on' : '') + '">每個測站、每個測項各一張</button><button type="button" data-fmode="item" class="' + (md === 'item' ? 'on' : '') + '">每個測項一張，各測站並列</button></span></div>' +
+      '<div class="ff-row"><span class="ff-lab">測站</span>' + (sts.length > 1 ? '<button type="button" class="mini-btn" data-fall="gSts">全選</button><button type="button" class="mini-btn" data-fonly="gSts">只選一個…</button>' : '') + sts.map(function (o) { return chip('gSts', o); }).join('') + '</div>' +
+      '<div class="ff-row"><span class="ff-lab">測項</span>' + (its.length > 1 ? '<button type="button" class="mini-btn" data-fall="gItems">全選</button><button type="button" class="mini-btn" data-fonly="gItems">只選一個…</button>' : '') + its.map(function (o) { return chip('gItems', o); }).join('') + '</div>' +
+      '<div class="ff-sum" id="gFSum"></div>';
+    applyFigFilter();
+  }
+  var fOnly = null; // 「只選一個」模式：下一個點的標籤變成唯一勾選
+  function applyFigFilter() {
+    var cs = lastCharts || [];
+    Array.prototype.forEach.call($('gOut').querySelectorAll('.fig[data-fi]'), function (f) { f.classList.toggle('off', !!figOff[+f.getAttribute('data-fi')]); });
+    var n = pickedCharts().length;
+    if ($('gFSum')) $('gFSum').innerHTML = (fOnly ? '<b class="warn-text">請點一個' + (fOnly === 'gSts' ? '測站' : '測項') + '，只畫它</b>　' : '') + '共 <b>' + cs.length + '</b> 張圖；下載全部圖檔與 Excel 會包含 <b>' + n + '</b> 張（圖左上角有勾選的）。';
+    $('gPngAll').disabled = !n; $('gXlsx').disabled = !n;
+    $('gMsg').textContent = '共 ' + cs.length + ' 張圖' + (n < cs.length ? '，已選 ' + n + ' 張' : '');
+  }
+  function setBox(id, v, on, only) {
+    Array.prototype.forEach.call($(id).querySelectorAll('input[type=checkbox]'), function (c) { if (only) c.checked = c.value === v; else if (v == null) c.checked = on && !/（文字）/.test(c.closest('label').textContent); else if (c.value === v) c.checked = on; });
+  }
+  $('gFilter').addEventListener('click', function (e) {
+    var mb = e.target.closest('[data-fmode]');
+    if (mb) { if (mb.classList.contains('on')) return; setRadio('gMode', mb.getAttribute('data-fmode')); updatePlan(); $('gGo').click(); return; }
+    var b = e.target.closest('[data-fk],[data-fall],[data-fonly]'); if (!b) return;
+    if (b.hasAttribute('data-fonly')) { fOnly = fOnly === b.getAttribute('data-fonly') ? null : b.getAttribute('data-fonly'); applyFigFilter(); return; }
+    if (b.hasAttribute('data-fall')) { setBox(b.getAttribute('data-fall'), null, true); fOnly = null; }
+    else {
+      var id = b.getAttribute('data-fk'), v = b.getAttribute('data-fv');
+      if (fOnly === id) { setBox(id, v, true, true); fOnly = null; }
+      else {
+        var on = !b.classList.contains('on');
+        if (!on && boxVals(id).filter(function (o) { return o.on; }).length <= 1) return toast('至少要留一個' + (id === 'gSts' ? '測站' : '測項'), true);
+        setBox(id, v, on);
+      }
+    }
+    saveForm(); updatePlan(); $('gGo').click();
+  });
+  $('gOut').addEventListener('change', function (e) {
+    var i = e.target.getAttribute('data-fpick'); if (i == null) return;
+    if (e.target.checked) delete figOff[+i]; else figOff[+i] = 1;
+    applyFigFilter();
+  });
+  function updatePlan() {
+    var ns = checkedVals('gSts').length, ni = checkedVals('gItems').length;
+    $('gPlan').textContent = ns && ni ? '目前勾選 ' + ns + ' 個測站、' + ni + ' 個測項' + (radio('gMode') === 'item' ? '，最多 ' + ni + ' 張圖' : '，最多 ' + ns * ni + ' 張圖') : '還沒有勾選測站或測項';
+  }
   function pngName(c) { return safeName((c.kind === 'station' ? c.station + '_' : '') + c.title) + '.png'; }
   function pngBlob(c) {
     var cv = document.createElement('canvas');
@@ -738,14 +978,15 @@
     var zip = new window.JSZip(), names = {};
     $('gMsg').textContent = '產生圖檔中…';
     var chain = Promise.resolve();
-    lastCharts.forEach(function (c) {
+    var pk = pickedCharts();
+    pk.forEach(function (c) {
       chain = chain.then(function () { return pngBlob(c); }).then(function (bl) {
         var n = pngName(c); if (names[n]) { names[n]++; n = n.replace(/\.png$/, '_' + names[n] + '.png'); } else names[n] = 1;
         zip.file(n, bl);
       });
     });
     chain.then(function () { return zip.generateAsync({ type: 'blob' }); }).then(function (bl) {
-      download(safeName(fileBase() + '_趨勢圖') + '.zip', bl); $('gMsg').textContent = '已下載 ' + lastCharts.length + ' 張圖';
+      download(safeName(fileBase() + '_趨勢圖') + '.zip', bl); $('gMsg').textContent = '已下載 ' + pk.length + ' 張圖';
     });
   });
   function fileBase() { var p = cur(); return (p && p.code ? p.code + '_' : '') + lastChartOpts.cat + '_' + periodText(lastChartOpts.period).replace(/～/g, '-'); }
@@ -754,7 +995,7 @@
     var o = lastChartOpts, p = cur();
     var tables = Co.reportTables(st.recs, st.stds, { cat: o.cat, period: o.period, stations: o.stations, items: o.tableItems, split: radio('gSplit') });
     $('gMsg').textContent = '產生 Excel 中…';
-    XO.build(window.ExcelJS, window.JSZip, { project: p ? (p.code ? p.code + ' ' : '') + p.name : '', cat: o.cat, periodText: periodText(o.period), tables: tables, charts: lastCharts, mode: o.mode, std: $('gStd').checked, zero: $('gZero').checked })
+    XO.build(window.ExcelJS, window.JSZip, { project: p ? (p.code ? p.code + ' ' : '') + p.name : '', cat: o.cat, periodText: periodText(o.period), tables: tables, charts: pickedCharts(), mode: o.mode, std: $('gStd').checked, zero: $('gZero').checked })
       .then(function (buf) { download(safeName(fileBase()) + '.xlsx', buf, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); $('gMsg').textContent = '已下載 Excel'; })
       .catch(function (e) { $('gMsg').textContent = ''; toast('Excel 產生失敗：' + e.message, true); });
   });
@@ -783,31 +1024,126 @@
     var p = force ? Promise.resolve(null) : S.getMeta('_', cacheKey, null);
     $('mSites').innerHTML = '<span class="muted">載入測站清單中…</span>';
     p.then(function (c) {
-      if (c && c.list && Date.now() - c.at < 30 * 864e5) return c.list;
+      if (c && c.list && Date.now() - c.at < 30 * 864e5 && (k !== 'air' || !c.list.length || 'area' in c.list[0])) return c.list;
       return (k === 'air' ? M.airSites(apiJson) : M.riverSites(apiJson)).then(function (list) { S.setMeta('_', cacheKey, { at: Date.now(), list: list }); return list; });
     }).then(function (list) { mSites[k] = list; renderSites(); })
       .catch(function (e) { $('mSites').innerHTML = '<div class="err-box">無法取得測站清單：' + esc(e.message) + '。請確認網路連線；若一直失敗，可能是環境部網址或金鑰變更，請找 AI 協助修改 js/moenv.js。</div>'; });
   }
-  function renderSites() {
-    var k = mKind(), list = mSites[k] || [];
-    var cty = $('mCounty').value, q = $('mQ').value.trim();
-    var counties = []; list.forEach(function (s) { if (s.county && counties.indexOf(s.county) < 0) counties.push(s.county); });
-    $('mCounty').innerHTML = opt('', '全部縣市', !cty) + counties.sort().map(function (c) { return opt(c, c, c === cty); }).join('');
-    var sel = {}; Array.prototype.forEach.call($('mSites').querySelectorAll('input:checked'), function (c) { sel[c.value] = 1; });
-    var show = list.filter(function (s) { return (!cty || s.county === cty) && (!q || (s.name + s.river + s.county + s.township).indexOf(q) >= 0); });
-    $('mSites').innerHTML = show.length ? show.slice(0, 800).map(function (s) {
-      var extra = k === 'air' ? (s.type ? '・' + s.type : '') : (s.river ? '・' + s.river : '') + (s.status === '停用' ? '・停用' : '');
-      return '<label class="chk"><input type="checkbox" value="' + esc(s.id) + '"' + (sel[s.id] ? ' checked' : '') + '> ' + esc(s.name) + '<span class="muted small">' + esc((s.county ? '（' + s.county : '（') + extra + '）') + '</span></label>';
-    }).join('') + (show.length > 800 ? '<div class="muted small">只列前 800 個，請用縣市或搜尋縮小範圍</div>' : '') : '<span class="muted">沒有符合的測站</span>';
+  /* 測站選擇：仿環境部查詢網的階層下拉（空品：空品區→縣市→測站；河川：縣市→河川→測站），加上快速搜尋與勾選清單。已選測站存在 mSel。 */
+  var mSel = { air: [], river: [] }, mComboIdx = -1, mComboHits = [];
+  var L_ALL = '';
+  function siteExtra(k, s) { return k === 'air' ? [s.county, s.type].filter(Boolean).join('・') : [s.county, s.river].filter(Boolean).join('・') + (s.status === '停用' ? '・停用' : ''); }
+  function lv(k, s) { return k === 'air' ? [s.area || '（未分區）', s.county || '（未註明）'] : [s.county || '（未註明）', s.river || '（未註明）']; }
+  function zhSort(a, b) { return a.localeCompare(b, 'zh-Hant-TW'); }
+  function siteList(k) {
+    var list = mSites[k] || [];
+    if (k === 'river' && $('mActive').checked) list = list.filter(function (s) { return s.status !== '停用'; });
+    return list;
   }
-  Array.prototype.forEach.call(document.querySelectorAll('input[name=mKind]'), function (r) { r.addEventListener('change', function () { $('mCounty').value = ''; mResult = null; $('mXlsx').disabled = true; $('mCsv').disabled = true; $('mPreview').innerHTML = ''; loadSites(false); }); });
-  $('mCounty').addEventListener('change', renderSites);
-  $('mQ').addEventListener('input', function () { clearTimeout(renderSites._t); renderSites._t = setTimeout(renderSites, 200); });
+  function uniq(arr) { var o = {}, r = []; arr.forEach(function (x) { if (!o[x]) { o[x] = 1; r.push(x); } }); return r.sort(zhSort); }
+  function filtered(k, upto) {
+    var v1 = $('mL1').value, v2 = $('mL2').value;
+    return siteList(k).filter(function (s) { var l = lv(k, s); return (!v1 || l[0] === v1) && (upto < 2 || !v2 || l[1] === v2); });
+  }
+  function renderSites() {
+    var k = mKind(), list = siteList(k);
+    $('mL1Lab').textContent = k === 'air' ? '空品區' : '縣市';
+    $('mL2Lab').textContent = k === 'air' ? '縣市' : '河川';
+    $('mActWrap').style.display = k === 'river' ? '' : 'none';
+    var v1 = $('mL1').value, v2 = $('mL2').value;
+    var l1 = uniq(list.map(function (s) { return lv(k, s)[0]; }));
+    if (v1 && l1.indexOf(v1) < 0) v1 = '';
+    $('mL1').innerHTML = opt(L_ALL, k === 'air' ? '全部空品區' : '全部縣市', !v1) + l1.map(function (c) { return opt(c, c, c === v1); }).join('');
+    var l2 = uniq(filtered(k, 1).map(function (s) { return lv(k, s)[1]; }));
+    if (v2 && l2.indexOf(v2) < 0) v2 = '';
+    $('mL2').innerHTML = opt(L_ALL, k === 'air' ? '全部縣市' : '全部河川', !v2) + l2.map(function (c) { return opt(c, c, c === v2); }).join('');
+    var show = filtered(k, 2), sel = {}; mSel[k].forEach(function (id) { sel[id] = 1; });
+    // 測站下拉：依第二層分組
+    var groups = {}; show.forEach(function (s) { var g = lv(k, s)[1]; (groups[g] = groups[g] || []).push(s); });
+    $('mL3').innerHTML = '<option value="">— 選擇測站（' + show.length + ' 站）—</option>' + Object.keys(groups).sort(zhSort).map(function (g) {
+      return '<optgroup label="' + esc(g) + '">' + groups[g].sort(function (a, b) { return (a.status === '停用') - (b.status === '停用') || zhSort(a.name, b.name); }).map(function (s) {
+        return '<option value="' + esc(s.id) + '">' + esc(s.name + (s.status === '停用' ? '（停用）' : '') + (sel[s.id] ? '　✓已選' : '')) + '</option>';
+      }).join('') + '</optgroup>';
+    }).join('');
+    $('mPickHint').textContent = '共 ' + list.length + ' 站；一次最多查 30 站';
+    $('mSites').innerHTML = show.length ? show.slice(0, 800).map(function (s) {
+      return '<label class="chk"><input type="checkbox" value="' + esc(s.id) + '"' + (sel[s.id] ? ' checked' : '') + '> ' + esc(s.name) + '<span class="muted small">（' + esc(siteExtra(k, s)) + '）</span></label>';
+    }).join('') + (show.length > 800 ? '<div class="muted small">只列前 800 個，請用上面的下拉選單縮小範圍</div>' : '') : '<span class="muted">沒有符合的測站</span>';
+    renderChips();
+  }
+  function siteById(k, id) { return (mSites[k] || []).filter(function (s) { return s.id === id; })[0]; }
+  function renderChips() {
+    var k = mKind(), ids = mSel[k];
+    $('mSelN').textContent = ids.length ? ids.length + ' 站' + (ids.length > 30 ? '（超過 30 站，請移除一些）' : '') : '';
+    $('mSelN').className = ids.length > 30 ? 'small err-text' : 'muted small';
+    $('mClr').hidden = !ids.length;
+    $('mChips').innerHTML = ids.length ? ids.map(function (id) {
+      var s = siteById(k, id) || { name: id };
+      return '<span class="schip">' + esc(s.name) + ' <span class="sub">' + esc(siteExtra(k, s)) + '</span><button type="button" data-rm="' + esc(id) + '" title="移除" aria-label="移除 ' + esc(s.name) + '">×</button></span>';
+    }).join('') : '<span class="muted small">尚未選擇，請用上面的下拉選單或搜尋加入。</span>';
+  }
+  function addSites(ids) {
+    var k = mKind(), n0 = mSel[k].length;
+    ids.forEach(function (id) { if (id && mSel[k].indexOf(id) < 0) mSel[k].push(id); });
+    var added = mSel[k].length - n0;
+    if (mSel[k].length > 30) toast('已選 ' + mSel[k].length + ' 站，一次最多查 30 站，請移除一些', true);
+    else if (ids.length > 1) toast(added ? '加入 ' + added + ' 站' : '這些測站都已經加入了');
+    renderSites();
+  }
+  function rmSite(id) { var k = mKind(); mSel[k] = mSel[k].filter(function (x) { return x !== id; }); renderSites(); }
+  $('mL1').addEventListener('change', function () { $('mL2').value = ''; renderSites(); });
+  $('mL2').addEventListener('change', renderSites);
+  $('mActive').addEventListener('change', renderSites);
+  $('mL3').addEventListener('change', function () { if (this.value) { addSites([this.value]); } });
+  $('mAdd').addEventListener('click', function () { if (!$('mL3').value) return toast('請先在「測站」下拉選單選一個測站', true); addSites([$('mL3').value]); });
+  $('mAddAll').addEventListener('click', function () {
+    var show = filtered(mKind(), 2);
+    if (!$('mL1').value && !$('mL2').value) return toast('請先用前兩個下拉選單縮小範圍，再加入全部', true);
+    addSites(show.map(function (s) { return s.id; }));
+  });
+  $('mClr').addEventListener('click', function () { mSel[mKind()] = []; renderSites(); });
+  $('mChips').addEventListener('click', function (e) { var b = e.target.closest('[data-rm]'); if (b) rmSite(b.getAttribute('data-rm')); });
+  $('mSites').addEventListener('change', function (e) {
+    var c = e.target; if (!c || c.type !== 'checkbox') return;
+    if (c.checked) addSites([c.value]); else rmSite(c.value);
+  });
+  // 快速搜尋（下拉建議）
+  function hl(t, q) { var i = q ? t.indexOf(q) : -1; return i < 0 ? esc(t) : esc(t.slice(0, i)) + '<mark>' + esc(q) + '</mark>' + esc(t.slice(i + q.length)); }
+  function comboRender() {
+    var k = mKind(), q = $('mQ').value.trim(), box = $('mQList');
+    if (!q) { box.hidden = true; mComboHits = []; return; }
+    var words = q.split(/\s+/);
+    mComboHits = siteList(k).map(function (s) {
+      var hay = [s.name, s.river, s.basin, s.county, s.township, s.area, s.type].join(' ');
+      if (!words.every(function (w) { return hay.indexOf(w) >= 0; })) return null;
+      var sc = s.name.indexOf(words[0]) === 0 ? 0 : s.name.indexOf(words[0]) > 0 ? 1 : 2;
+      return { s: s, sc: sc + (s.status === '停用' ? 3 : 0) };
+    }).filter(Boolean).sort(function (a, b) { return a.sc - b.sc || zhSort(a.s.name, b.s.name); }).slice(0, 60).map(function (h) { return h.s; });
+    if (mComboIdx >= mComboHits.length) mComboIdx = mComboHits.length - 1;
+    var sel = {}; mSel[k].forEach(function (id) { sel[id] = 1; });
+    box.innerHTML = mComboHits.length ? mComboHits.map(function (s, i) {
+      return '<div class="combo-item' + (i === mComboIdx ? ' act' : '') + (sel[s.id] ? ' on' : '') + '" data-i="' + i + '"><span>' + hl(s.name, words[0]) + (sel[s.id] ? '　✓已選' : '') + '</span><span class="sub">' + hl(siteExtra(k, s) + (s.township ? '・' + s.township : ''), words[0]) + '</span></div>';
+    }).join('') : '<div class="combo-empty">找不到符合「' + esc(q) + '」的測站</div>';
+    box.hidden = false;
+    var act = box.querySelector('.act'); if (act) act.scrollIntoView({ block: 'nearest' });
+  }
+  function comboPick(i) { var s = mComboHits[i]; if (!s) return; addSites([s.id]); $('mQ').value = ''; mComboIdx = -1; comboRender(); $('mQ').focus(); }
+  $('mQ').addEventListener('input', function () { mComboIdx = 0; comboRender(); });
+  $('mQ').addEventListener('focus', comboRender);
+  $('mQ').addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); mComboIdx = Math.min(mComboIdx + 1, mComboHits.length - 1); comboRender(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); mComboIdx = Math.max(mComboIdx - 1, 0); comboRender(); }
+    else if (e.key === 'Enter') { e.preventDefault(); comboPick(mComboIdx < 0 ? 0 : mComboIdx); }
+    else if (e.key === 'Escape') { $('mQList').hidden = true; }
+  });
+  $('mQList').addEventListener('mousedown', function (e) { var it = e.target.closest('[data-i]'); if (it) { e.preventDefault(); comboPick(+it.getAttribute('data-i')); } });
+  $('mQ').addEventListener('blur', function () { setTimeout(function () { $('mQList').hidden = true; }, 150); });
+  Array.prototype.forEach.call(document.querySelectorAll('input[name=mKind]'), function (r) { r.addEventListener('change', function () { $('mL1').value = ''; $('mL2').value = ''; $('mQ').value = ''; $('mQList').hidden = true; mResult = null; $('mXlsx').disabled = true; $('mCsv').disabled = true; $('mPreview').innerHTML = ''; loadSites(false); }); });
   $('mLoad').addEventListener('click', function () { loadSites(true); });
   $('mGo').addEventListener('click', function () {
-    var k = mKind(), ids = Array.prototype.map.call($('mSites').querySelectorAll('input:checked'), function (c) { return c.value; });
+    var k = mKind(), ids = mSel[k].slice();
     var from = $('mFrom').value, to = $('mTo').value;
-    if (!ids.length) return toast('請至少勾選一個測站', true);
+    if (!ids.length) return toast('請至少選擇一個測站', true);
     if (!from || !to) return toast('請選擇起訖年月', true);
     if (from > to) { var t = from; from = to; to = t; }
     if (ids.length > 30) return toast('一次最多 30 個測站，避免環境部暫時封鎖查詢', true);
@@ -819,7 +1155,7 @@
       mResult = { kind: k, raw: raw, pivot: pv, from: from, to: to };
       $('mMsg').textContent = '完成：' + raw.length + ' 筆原始資料、' + pv.rows.length + ' 列整理資料';
       $('mXlsx').disabled = !raw.length; $('mCsv').disabled = !raw.length;
-      $('mPreview').innerHTML = raw.length ? '<table class="t"><thead><tr><th>測站</th><th>' + (k === 'air' ? '月份' : '採樣時間') + '</th>' + pv.items.map(function (i) { return '<th>' + esc(i) + '<br><span class="small muted">' + esc(pv.units[i] || '') + '</span></th>'; }).join('') + '</tr></thead><tbody>' +
+      $('mPreview').innerHTML = raw.length ? '<table class="t mv-t"><thead><tr><th>測站</th><th>' + (k === 'air' ? '月份' : '採樣時間') + '</th>' + pv.items.map(function (i) { return '<th>' + esc(i) + '<br><span class="small muted">' + esc(pv.units[i] || '') + '</span></th>'; }).join('') + '</tr></thead><tbody>' +
         pv.rows.slice(0, 120).map(function (r) { return '<tr><td>' + esc(r.st) + '</td><td>' + esc(r.period) + '</td>' + pv.items.map(function (i) { return '<td class="num">' + esc(r.vals[i] == null ? '' : r.vals[i]) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table>' : '<div class="empty">這段期間沒有資料</div>';
     }).catch(function (e) { $('mMsg').textContent = ''; toast('查詢失敗：' + e.message, true); }).then(function () { btn.disabled = false; });
   });

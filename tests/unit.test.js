@@ -268,3 +268,28 @@ test('環境部 API 網址與整理', () => {
   assert.equal(q[0].vals['懸浮微粒(PM10)'], 35); assert.equal(q[0].months, 2); assert.equal(q[0].period, '114Q1');
   assert.ok(M.toCsv([{ a: '1,2', b: 'x' }]).includes('"1,2"'));
 });
+
+test('季節性標準（水溫 35/38）與判定方式', () => {
+  const v = X.stdSeason('35/38', '水溫');
+  assert.deepEqual(v.map(x => [x.text, x.m1, x.m2]), [['38', 5, 9], ['35', 10, 4]]);
+  assert.equal(X.stdSeason('35/38', '懸浮固體'), null);
+  assert.equal(X.stdMode('6~9'), 'range'); assert.equal(X.stdMode('2以上'), 'min'); assert.equal(X.stdMode('75'), 'max');
+  const stds = v.map(x => Object.assign({ cat: '放流水', st: '*', item: '水溫', mode: 'max' }, x));
+  assert.equal(Co.stdFor(stds, '放流水', '甲', '水溫', '2026-01-13').text, '35');
+  assert.equal(Co.stdFor(stds, '放流水', '甲', '水溫', '2026-07-01').text, '38');
+  assert.equal(Co.stdJudge(23.8, Co.stdFor(stds, '放流水', '甲', '水溫', '2026-01-13')), false);
+  assert.equal(Co.stdJudge(36, Co.stdFor(stds, '放流水', '甲', '水溫', '2026-01-13')), true);
+  assert.equal(Co.stdJudge(36, Co.stdFor(stds, '放流水', '甲', '水溫', '2026-07-13')), false);
+  assert.equal(Co.stdJudge(1.5, { lines: [2], mode: 'min' }), true);
+  assert.equal(Co.stdJudge(9.5, { lines: [6, 9], text: '6~9' }), true);
+  assert.equal(Co.stdJudge(30, { lines: [35, 38], text: '35/38' }), false); // 未指定時不當成範圍
+  assert.equal(Co.monthNote({ m1: 10, m2: 4 }), '10～翌年4月');
+  // 異常檢查：冬天 23.8℃ 不算超標
+  const recs = [3, 4, 5, 8, 11].map(m => ({ pid: 'p', cat: '放流水', st: '甲', iso: '2026-' + String(m).padStart(2, '0') + '-10', dl: '', note: '', item: '水溫', unit: '℃', raw: m === 8 ? '39' : '23.8', k: 'k' + m }));
+  const an = Co.anomalies(recs, stds, { ok: {} }).filter(a => a.type === 'over');
+  assert.equal(an.length, 1); assert.match(an[0].msg, /38/);
+  // 趨勢圖：季節性標準分段畫，各段只在自己的月份
+  const c = Co.buildCharts(recs, stds, { cat: '放流水', stations: ['甲'], items: ['水溫'], mode: 'station', xmode: 'orig' });
+  const segs = c[0].stdLines.map(l => [l.v, l.i0, l.i1, l.lead]);
+  assert.deepEqual(segs, [[38, 2, 3, true], [35, 0, 1, true], [35, 4, 4, false]]);
+});

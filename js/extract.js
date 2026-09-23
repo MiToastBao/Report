@@ -79,6 +79,25 @@
     return out.filter(function (v) { if (seen[v]) return false; seen[v] = 1; return true; }).slice(0, 3);
   }
 
+  // 判定方式：max＝上限（不可超過，預設）、min＝下限（不可低於，例如溶氧 2 以上）、range＝範圍（例如 pH 6~9）
+  function stdMode(text, item) {
+    var s = norm(text), n = stdLines(s).length;
+    if (/以上|≧|≥|>=|不得低於|不低於|大於/.test(s)) return 'min';
+    if (/\d\s*(?:[~～至]|[-－–]\s*\d)/.test(s) || /範圍|之間/.test(s)) return 'range';
+    // 兩個值：pH 一定是範圍；「6.0 | 9.0」這種上下限分兩格的也是範圍；「35/38」斜線是多個值（取較寬鬆的當上限）
+    if (n === 2 && (/^\s*pH/i.test(item || '') || !/[\/／]/.test(s))) return 'range';
+    return 'max';
+  }
+  // 季節性標準：放流水水溫「38/35」＝5～9 月 38℃、10 月～翌年 4 月 35℃（放流水標準的寫法）
+  // 回傳多筆 {text, lines, m1, m2}；不是季節性的就回傳 null
+  function stdSeason(text, item) {
+    var s = norm(text), m = /^\s*(\d+(?:\.\d+)?)\s*[\/／]\s*(\d+(?:\.\d+)?)\s*(?:℃|°C|度)?\s*$/.exec(s);
+    if (!m || !/水溫/.test(item || '')) return null;
+    var a = +m[1], b = +m[2], hi = Math.max(a, b), lo = Math.min(a, b);
+    if (hi === lo) return null;
+    return [{ text: String(hi), lines: [hi], m1: 5, m2: 9 }, { text: String(lo), lines: [lo], m1: 10, m2: 4 }];
+  }
+
   /* ---------- 單位與名稱 ---------- */
   var RE_UNIT = /(dB\s*\(\s*[AC]\s*\)|μg\/m[3³]|µg\/m[3³]|ug\/m[3³]|mg\/m[3³]|mg\/L|mg\/l|mg\/kg|μg\/L|ppm|ppb|℃|°C|μmho\/cm(?:25℃)?|μS\/cm|mS\/cm|CFU\/100\s*mL|MPN\/100\s*mL|NTU|psu|公噸重?\/平方公里\/月|克\/[(（]?平方公尺[.．]?30天[)）]?|g\/m2\/30天|公噸\/km2\/月|m3\/min|m\/sec|m\/s|hPa|dB|％|%)/;
   var RE_UNIT_ONLY = new RegExp('^[(（]?\\s*' + RE_UNIT.source + '\\s*[)）]?$|^(?:－|-|—|無單位|單位)$');
@@ -417,7 +436,7 @@
 
   /* ================= 2. 單次檢測報告（沒有日期欄） ================= */
   var RE_META_ITEM = /次數|日期|時間|座標|高度|距離|編號|人員|天氣|氣壓|壓力|降雨|儀器|校正|頁次|電話|傳真|地址|^晴|^陰|^雨|多雲|營造業|採樣行程|樣品|客戶|檢驗室/;
-  var RE_ST_LABEL = /^(採樣地點|監測地點|檢測地點|採樣位置|監測位置|測站名稱|測點名稱|測點位置|測站|樣品名稱|監測點|調查地點)\s*[:：]?\s*(.*)$/;
+  var RE_ST_LABEL = /^(採樣地點|監測地點|檢測地點|採樣位置|監測位置|測站名稱|測點名稱|測點位置|測站|樣品名稱|監測點|調查地點)\s*(?:[:：]\s*(.*))?$/;
   var RE_DATE_LABEL = /^(監測日期|採樣日期|採樣時間|檢測日期|測定日期|調查日期|監測時間|採樣期間|監測期間|測定時間|日期)[^:：]{0,8}[:：]?\s*(.*)$/;
   var RE_VHDR_VAL = /檢測值|檢驗值|測值|檢測結果|分析結果|結果|濃度|數值/;
   var RE_ROLE_SKIP = /單位|極限|MDL|定量|方法|備註|說明|頁|編號$/;
@@ -436,7 +455,7 @@
       if (!title && /報告|紀錄|記錄/.test(v) && v.length <= 30) title = v;
       if (/^樣品特性/.test(v)) title += ' ' + (v.replace(/^樣品特性\s*[:：]?/, '') || right(r, c));
       var m;
-      if (!st && (m = RE_ST_LABEL.exec(v))) { st = m[2] || right(r, c); }
+      if (!st && (m = RE_ST_LABEL.exec(v))) { st = (m[2] || '').trim() || right(r, c); }
       if (!d && (m = RE_DATE_LABEL.exec(v)) && !/收樣|報告|分析|列印/.test(v)) {
         var dd = parseDate(m[2]) || parseDate(right(r, c));
         if (dd) { d = dd; if (dd.rest) uniqPush(notes, dd.rest); var lbn = /[(（](平日|假日)[)）]/.exec(v); if (lbn) uniqPush(notes, lbn[1]); }
@@ -590,7 +609,7 @@
     for (var si = 0; si < segList.length; si++) {
       var r2 = segList[si].r, I = segList[si].sg;
       if (used[r2] || info[r2].hourly || !I.vals.length || I.lc < 0) continue;
-      if (isDateCell(I.lab) || /[:：]$/.test(I.lab) || /^[※＊*]|^註/.test(I.lab)) continue;
+      if (isDateCell(I.lab) || /[:：=＝]$/.test(I.lab) || /^[※＊*]|^註/.test(I.lab)) continue;
       var hdr2 = headerRows(r2, I.vals);
       if (!hdr2.length) continue;
       // 表頭格不可是「欄位名稱：」這類表單標籤或長句
@@ -777,7 +796,7 @@
   }
 
   return {
-    norm: norm, parseDate: parseDate, isDateCell: isDateCell, parseVal: parseVal, isValueLike: isValueLike, stdLines: stdLines,
+    norm: norm, parseDate: parseDate, isDateCell: isDateCell, parseVal: parseVal, isValueLike: isValueLike, stdLines: stdLines, stdMode: stdMode, stdSeason: stdSeason,
     splitUnit: splitUnit, cleanItem: cleanItem, stdPeriod: stdPeriod, captionStation: captionStation, guessCat: guessCat, CATS: CATS,
     extractTable: extractTable, extractAll: extractAll, DBG: DBG
   };
