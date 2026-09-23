@@ -298,3 +298,19 @@ table.mv-t th:first-child { background: #eef2f9; }
 .seg button.on { background: var(--accent); color: #fff; }
 .ff-title { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
 .warn-text { color: #b35c00; }
+
+/* 標準值：篩選與測站×測項對照表 */
+.std-filter { align-items: flex-end; margin-top: 4px; }
+.std-t thead th, .std-grid thead th { position: sticky; top: 0; z-index: 2; background: #eef2f9; }
+.std-grid { border-collapse: collapse; }
+.std-grid th, .std-grid td { border: 1px solid #e3e8f1; padding: 7px 10px; text-align: center; white-space: nowrap; font-size: 13.5px; }
+.std-grid th.g-st { position: sticky; left: 0; z-index: 1; background: #f6f8fc; text-align: left; white-space: normal; min-width: 110px; max-width: 200px; }
+.std-grid thead th.g-st { z-index: 3; background: #eef2f9; }
+.std-grid td.g-own { background: #e6f4ea; color: #1d5b2c; }
+.std-grid td.g-all { background: #fff; }
+.std-grid td.g-miss { background: #fdecec; color: #b42318; font-weight: 600; }
+.std-grid td.g-skip { background: #fafbfd; }
+.g-legend { font-size: 12.5px; color: var(--muted); padding: 8px 10px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.g-legend span[class^="g-"] { padding: 2px 8px; border-radius: 6px; border: 1px solid #e3e8f1; }
+.g-legend .g-own { background: #e6f4ea; } .g-legend .g-miss { background: #fdecec; color: #b42318; } .g-legend .g-all { background: #fff; }
+.std-grid td[data-gst] { cursor: pointer; } .std-grid td[data-gst]:hover { outline: 2px solid var(--accent); outline-offset: -2px; }

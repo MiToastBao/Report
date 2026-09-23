@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>監測報告趨勢圖產生器</title>
-<link rel="stylesheet" href="css/app.css?v=1.0.4">
+<link rel="stylesheet" href="css/app.css?v=1.0.5">
 </head>
 <body>
 <div class="shell">
@@ -13,7 +13,7 @@
       <div class="mark" aria-hidden="true"><svg viewBox="0 0 32 32" width="26" height="26"><rect x="5" y="16" width="4.5" height="11" rx="1.2" fill="#fff" opacity=".55"/><rect x="11.5" y="10" width="4.5" height="17" rx="1.2" fill="#fff" opacity=".8"/><rect x="18" y="13" width="4.5" height="14" rx="1.2" fill="#fff" opacity=".65"/><rect x="24.5" y="6" width="4.5" height="21" rx="1.2" fill="#fff"/><path d="M3 9.5 H29" stroke="#ff8a8a" stroke-width="1.6" stroke-dasharray="2.6 2"/></svg></div>
       <div>
         <div class="brand-name">監測報告<br>趨勢圖產生器</div>
-        <div class="brand-ver" id="verPill">v1.0.4</div>
+        <div class="brand-ver" id="verPill">v1.0.5</div>
       </div>
     </div>
     <div class="proj-box">
@@ -35,7 +35,7 @@
       <div class="nav-group">不分計畫</div>
       <button class="nav-item" data-sec="moenv"><span class="nav-no">7</span>環境部資料查詢</button>
       <button class="nav-item" data-sec="backup"><span class="nav-no">8</span>備份與還原</button>
-      <a class="nav-item nav-link" href="使用說明.html?v=1.0.4" target="_blank" rel="noopener"><span class="nav-no">?</span>使用說明</a>
+      <a class="nav-item nav-link" href="使用說明.html?v=1.0.5" target="_blank" rel="noopener"><span class="nav-no">?</span>使用說明</a>
     </nav>
     <div class="side-foot">資料只存在這台電腦的瀏覽器，不會上傳。</div>
   </aside>
@@ -150,6 +150,14 @@
         <div class="filters"><label>類別<select id="sCat"></select></label><span class="spacer"></span><button class="btn" id="sBack" hidden>← 回到趨勢圖</button><button class="btn primary" id="sAdd">＋ 新增一筆標準值</button></div>
         <div id="sAddForm" class="subcard" hidden></div>
         <datalist id="monthPresets"><option value="5-9">5～9 月</option><option value="10-4">10 月～翌年 4 月</option><option value="4-9">4～9 月</option><option value="10-3">10 月～翌年 3 月</option></datalist>
+        <div class="filters std-filter">
+          <span class="seg" id="sView"><button type="button" data-sview="list" class="on">標準值清單</button><button type="button" data-sview="grid">測站 × 測項對照表</button></span>
+          <label>測項<select id="sfItem"></select></label>
+          <label>測站<select id="sfSt"></select></label>
+          <label class="grow">搜尋<input id="sfQ" placeholder="標準值、說明…"></label>
+          <label class="chk" id="sfMissWrap"><input type="checkbox" id="sfMiss"> 只看沒有標準值的</label>
+          <span id="sfCount" class="muted small"></span>
+        </div>
         <div class="table-wrap" id="sTable"></div>
         <h3 class="mt">測項名稱與單位</h3>
         <p class="muted small">改名會套用到這個類別所有已匯入的資料，之後匯入同名測項也會自動改成新名稱。</p>
@@ -283,17 +291,17 @@
   </main>
 </div>
 
-<script src="vendor/jszip.min.js?v=1.0.4"></script>
-<script src="vendor/xlsx.full.min.js?v=1.0.4"></script>
-<script src="vendor/exceljs.min.js?v=1.0.4"></script>
-<script src="js/version.js?v=1.0.4"></script>
-<script src="js/docread.js?v=1.0.4"></script>
-<script src="js/extract.js?v=1.0.4"></script>
-<script src="js/core.js?v=1.0.4"></script>
-<script src="js/chart.js?v=1.0.4"></script>
-<script src="js/xlsxout.js?v=1.0.4"></script>
-<script src="js/moenv.js?v=1.0.4"></script>
-<script src="js/store.js?v=1.0.4"></script>
-<script src="js/app.js?v=1.0.4"></script>
+<script src="vendor/jszip.min.js?v=1.0.5"></script>
+<script src="vendor/xlsx.full.min.js?v=1.0.5"></script>
+<script src="vendor/exceljs.min.js?v=1.0.5"></script>
+<script src="js/version.js?v=1.0.5"></script>
+<script src="js/docread.js?v=1.0.5"></script>
+<script src="js/extract.js?v=1.0.5"></script>
+<script src="js/core.js?v=1.0.5"></script>
+<script src="js/chart.js?v=1.0.5"></script>
+<script src="js/xlsxout.js?v=1.0.5"></script>
+<script src="js/moenv.js?v=1.0.5"></script>
+<script src="js/store.js?v=1.0.5"></script>
+<script src="js/app.js?v=1.0.5"></script>
 </body>
 </html>
