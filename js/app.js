@@ -665,7 +665,7 @@
 
   /* ================= 標準值 ================= */
   function renderStd() {
-    if (!st.pid) { $('sTable').innerHTML = '<div class="empty">請先建立或選擇計畫</div>'; $('iTable').innerHTML = ''; return; }
+    if (!st.pid) { $('sAddForm').hidden = true; $('sTable').innerHTML = '<div class="empty">請先建立或選擇計畫</div>'; $('iTable').innerHTML = ''; return; }
     var cats = catsInData(), cat = $('sCat').value;
     if (!cat || cats.indexOf(cat) < 0) cat = cats[0] || '';
     $('sCat').innerHTML = cats.map(function (c) { return opt(c, c, c === cat); }).join('') || '<option value="">（還沒有資料）</option>';
@@ -681,6 +681,8 @@
     order.sort(function (a, b) { return a < b ? -1 : 1; });
     stdGroups = order.map(function (g) { return groups[g]; });
     $('sBack').hidden = !st.stdFromChart;
+    var af = $('sAddForm');
+    if (!af.hidden && (af.dataset.cat !== cat || af.dataset.pid !== st.pid)) { $('sCat').value = cat; openAddForm(false); }
     $('sTable').innerHTML = stdGroups.length ? '<table class="t std-t"><thead><tr><th>測項</th><th>標準值</th><th>判定方式</th><th>適用月份<br><span class="small muted">格式 5-9、10-4<br>空白＝全年</span></th><th>適用期間 起<br><span class="small muted">格式 112.01.01<br>空白＝不限</span></th><th>適用期間 迄<br><span class="small muted">格式 112.12.31<br>空白＝不限</span></th><th>畫線<br>數值</th><th>適用測站</th><th>說明／來源</th><th></th></tr></thead><tbody>' + stdGroups.map(function (g, i) {
       return '<tr><td>' + esc(g.item) + '</td><td><input class="cell" style="width:100px;text-align:left" data-sg="' + i + '" value="' + esc(g.text) + '"></td>' +
         '<td><select class="cell" data-sgm="' + i + '">' + MODE_OPTS.map(function (m) { return opt(m[0], m[1], m[0] === g.mode); }).join('') + '</select></td>' +
@@ -739,22 +741,27 @@
     var a = +m[1], b = +m[2]; if (a < 1 || a > 12 || b < 1 || b > 12) return false;
     return [a, b];
   }
-  $('sAdd').addEventListener('click', function () {
-    var cat = $('sCat').value; if (!cat) return toast('請先匯入資料', true);
-    var cg = Co.catalog(st.recs, cat, null), f = $('sAddForm');
-    f.hidden = false;
+  // 新增標準值表單：依目前類別產生；表單開著時切換類別會自動換成新類別的測項與測站
+  function openAddForm(focus) {
+    var cat = $('sCat').value, f = $('sAddForm'); if (!cat) { f.hidden = true; return; }
+    var cg = Co.catalog(st.recs, cat, null);
+    f.hidden = false; f.dataset.cat = cat; f.dataset.pid = st.pid;
     f.innerHTML = '<div class="filters wrap">' +
       '<label>測項<select id="saItem">' + cg.items.map(function (it) { return opt(it, it); }).join('') + '</select></label>' +
       '<label>適用測站<select id="saSt">' + opt('*', '全部測站') + cg.stations.map(function (x) { return opt(x, x); }).join('') + '</select></label>' +
-      '<label>標準值<input id="saText" style="width:110px" placeholder="38"></label>' +
+      '<label>標準值<input id="saText" style="width:110px" placeholder="75"></label>' +
       '<label>判定方式<select id="saMode">' + MODE_OPTS.map(function (m) { return opt(m[0], m[1]); }).join('') + '</select></label>' +
       '<label>適用月份（空白＝全年）<input id="saMon" list="monthPresets" style="width:120px" placeholder="5-9"></label>' +
       '<label>適用期間 起（空白＝不限）<input id="saFrom" style="width:130px" placeholder="112.01.01"></label>' +
       '<label>適用期間 迄（空白＝不限）<input id="saTo" style="width:130px" placeholder="112.12.31"></label>' +
-      '<label class="grow">說明（選填）<input id="saNote" placeholder="例：放流水標準（夏季）"></label>' +
+      '<label class="grow">說明（選填）<input id="saNote" placeholder="例：法規名稱、管制區類別"></label>' +
       '</div><div class="actions"><button class="btn primary" id="saGo" type="button">新增</button><button class="btn" id="saCancel" type="button">取消</button><span class="muted small">季節性標準（例如水溫）請新增兩筆，各填不同的適用月份。</span></div>';
     $('saText').addEventListener('input', function () { $('saMode').value = X.stdMode(this.value, $('saItem').value); });
-    $('saText').focus();
+    if (focus) $('saText').focus();
+  }
+  $('sAdd').addEventListener('click', function () {
+    if (!$('sCat').value) return toast('請先匯入資料', true);
+    openAddForm(true);
   });
   $('sAddForm').addEventListener('click', function (e) {
     if (e.target.id === 'saCancel') { $('sAddForm').hidden = true; return; }
