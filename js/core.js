@@ -112,7 +112,7 @@
     function stdLinesOf(st, item) {
       var out = [];
       stdsFor(stds, cat, st, item).forEach(function (s) {
-        s.lines.forEach(function (v) { out.push({ v: v, label: s.label || '標準值', text: s.text, from: s.from || '', to: s.to || '', m1: s.m1 || 0, m2: s.m2 || 0, period: periodNote(s) }); });
+        s.lines.forEach(function (v) { out.push({ v: v, label: s.label || '標準值', text: s.text, from: s.from || '', to: s.to || '', m1: s.m1 || 0, m2: s.m2 || 0, period: s.from || s.to ? periodNote0(s) : '' }); }); // 圖上文字不寫適用月份（線的位置就代表月份）
       });
       return out;
     }

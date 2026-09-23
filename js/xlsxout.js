@@ -159,10 +159,10 @@
           var nameCell = ws.getCell(row, helperCol);
           var A = '$A$' + row, B = '$B$' + row;
           function roc(X) { return '(YEAR(' + X + ')-1911)&TEXT(' + X + ',".mm.dd")'; }
-          var Dm = '$D$' + row, Em = '$E$' + row, noM = 'OR(' + Dm + '="",' + Em + '="")', noD = 'AND(' + A + '="",' + B + '="")';
+          var Dm = '$D$' + row, Em = '$E$' + row, noD = 'AND(' + A + '="",' + B + '="")';
           var core = 'IF(' + noD + ',"",IF(' + A + '="","至"&' + roc(B) + ',IF(' + B + '="",' + roc(A) + '&"起",' + roc(A) + '&"～"&' + roc(B) + ')))';
-          var mon = 'IF(' + noM + ',"",IF(' + noD + ',"","，")&' + Dm + '&"～"&IF(' + Em + '<' + Dm + ',"翌年","")&' + Em + '&"月")';
-          var per = 'IF(AND(' + noD + ',' + noM + '),"","（"&' + core + '&' + mon + '&"）")';
+          // 圖例只寫適用期間（日期），不寫適用月份
+          var per = 'IF(' + noD + ',"","（"&' + core + '&"）")';
           nameCell.value = { formula: 'IF($C$' + row + '="","","標準值 "&$C$' + row + '&"' + unitTxt + '"&' + per + ')', result: txt };
           var vals = [];
           for (var i = 0; i < n; i++) {
