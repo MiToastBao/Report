@@ -299,13 +299,39 @@
         var miss = Object.keys(cnts).filter(function (it) { return !d.items[it] && cnts[it] >= Math.max(2, total * 0.6); });
         if (miss.length) add({ id: 'miss|' + cat + '|' + k2 + '|' + miss.join(','), type: 'missing', level: 'warn', cat: cat, st: d.st, iso: d.iso, note: d.note, dl: d.dl, items: miss, msg: '這次採樣少了 ' + miss.length + ' 個測項：' + miss.join('、') + '（此站其他採樣大多有）' });
       });
-      // 4. 名稱很像的測站
+      // 3b. 兩站在相同日期的數值全部一樣（v1.0.8）：可能是同一站名稱不同，也可能是數值誤植（複製貼上），讓使用者確認
       var sts = uniq(rs.map(function (r) { return r.st; }));
+      var vmap = {};   // 測站 → 日期|測項 → 數值（同一天多筆，例如平日／假日，排序後合併）
+      rs.forEach(function (r) {
+        if (r.excl || textItems[r.item]) return;
+        var m = vmap[r.st] = vmap[r.st] || {}, kk = r.iso + '|' + r.item;
+        (m[kk] = m[kk] || []).push(String(r.raw).trim());
+      });
+      var sameVal = {};
+      for (var p = 0; p < sts.length; p++) for (var q = p + 1; q < sts.length; q++) {
+        var A = vmap[sts[p]] || {}, B = vmap[sts[q]] || {}, common = 0, numEq = 0, diff = false, days = {};
+        Object.keys(A).forEach(function (kk) {
+          if (diff || !B[kk]) return;
+          common++;
+          if (A[kk].slice().sort().join('\u0001') !== B[kk].slice().sort().join('\u0001')) { diff = true; return; }
+          A[kk].forEach(function (v) { if (valOf(v).kind === 'num') numEq++; });
+          days[kk.split('|')[0]] = 1;
+        });
+        if (diff || numEq < 3) continue;
+        var dl = Object.keys(days).sort().map(rocDate);
+        sameVal[sts[p] + '\u0001' + sts[q]] = 1;
+        add({ id: 'same|' + cat + '|' + sts[p] + '|' + sts[q], type: 'sameval', level: 'warn', cat: cat, names: [sts[p], sts[q]], days: dl, msg: '測站「' + sts[p] + '」與「' + sts[q] + '」在相同日期的 ' + common + ' 個數值完全一樣（' + dl.slice(0, 6).join('、') + (dl.length > 6 ? ' 等 ' + dl.length + ' 天' : '') + '）。若是同一站名稱不同，請歸入其中一站；若不是同一站，可能是數值誤植（複製貼上），請到資料檢視核對報告。' });
+      }
+      // 4. 名稱很像的測站（數值全部一樣的已在上面提醒，不重複）
       for (var i = 0; i < sts.length; i++) for (var j = i + 1; j < sts.length; j++) {
         var a = nameKey(sts[i]), b = nameKey(sts[j]);
         if (!a || !b) continue;
         var digitsA = a.replace(/\D/g, ''), digitsB = b.replace(/\D/g, '');
         if (digitsA !== digitsB) continue; // 只差編號（第1點、第2點）是不同測站
+        // 只差方位字（上游／下游、北岸／南岸、東側／西側）是同一處的不同測站，不提醒（v1.0.6）
+        var DIR = /[上中下左右東西南北前後內外]/g;
+        if (a !== b && a.length === b.length && a.replace(DIR, '') === b.replace(DIR, '')) continue;
+        if (sameVal[sts[i] + '\u0001' + sts[j]]) continue;
         if (a === b || a.indexOf(b) >= 0 || b.indexOf(a) >= 0 || (Math.min(a.length, b.length) >= 4 && lev(a, b) <= 1)) {
           add({ id: 'sim|' + cat + '|' + sts[i] + '|' + sts[j], type: 'similar', level: 'warn', cat: cat, names: [sts[i], sts[j]], msg: '測站「' + sts[i] + '」與「' + sts[j] + '」名稱很像，可能是同一站' });
         }
@@ -325,7 +351,7 @@
     });
     // 7. 匯入時數值不同而被覆蓋
     conflicts.forEach(function (c) {
-      add({ id: 'conf|' + c.k + '|' + c.old + '|' + c.raw, type: 'conflict', level: 'warn', cat: c.cat, k: c.k, rec: recs.filter(function (r) { return r.k === c.k; })[0] || null, msg: '兩份檔案數值不同：原本「' + c.old + '」（' + (c.oldSrc || '') + '），已改為「' + c.raw + '」（' + (c.src || '') + '）' });
+      add({ id: 'conf|' + c.k + '|' + c.old + '|' + c.raw, type: 'conflict', level: 'warn', cat: c.cat, k: c.k, rec: recs.filter(function (r) { return r.k === c.k; })[0] || null, msg: c.how === 'merge' ? '測站「' + c.from + '」歸入「' + c.to + '」時同一天數值不同：「' + c.from + '」為「' + c.old + '」（' + (c.oldSrc || '') + '），「' + c.to + '」為「' + c.raw + '」（' + (c.src || '') + '），目前用「' + c.to + '」的值' : '兩份檔案數值不同：原本「' + c.old + '」（' + (c.oldSrc || '') + '），已改為「' + c.raw + '」（' + (c.src || '') + '）' });
     });
     return out;
   }

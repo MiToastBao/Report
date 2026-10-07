@@ -293,3 +293,97 @@ test('季節性標準（水溫 35/38）與判定方式', () => {
   const segs = c[0].stdLines.map(l => [l.v, l.i0, l.i1, l.lead]);
   assert.deepEqual(segs, [[38, 2, 3, true], [35, 0, 1, true], [35, 4, 4, false]]);
 });
+
+/* ---------- v1.0.6：水質分類與同名測站（虛構資料） ---------- */
+function riverTable(caption) {
+  return tbl([
+    ['位置', '時間', '水溫', 'pH', '溶氧量', '懸浮固體'],
+    ['單位', '單位', '℃', '－', 'mg/L', 'mg/L'],
+    ['上游', '115.08.03', '29.0', '7.8', '4.7', '159'],
+    ['下游', '115.08.03', '29.2', '7.7', '5.0', '128'],
+    ['丁類陸域地面水體水質標準', '丁類陸域地面水體水質標準', '－', '6.0 ∣ 9.0', '>2.0', '100']
+  ], caption);
+}
+
+test('#1 類別以表名為準：表名寫河川水，前後文提到工區放流水也不可以分到放流水', () => {
+  const t = riverTable('表2-5 本季(7~9月)虛構溪河川水監測結果');
+  t.ctx = ['本季工區放流水各監測項目皆符合標準，河川水超標項目應非受本工程影響'];
+  const ds = X.extractTable(t, {});
+  assert.equal(ds.cat, '河川水');
+  // 表名本身沒有類別線索時，才看前後文
+  const t2 = tbl(riverTable('').rows, '表2-4 北岸工區監測結果');
+  t2.ctx = ['本月至工區放流口執行放流水採樣監測'];
+  assert.equal(X.extractTable(t2, {}).cat, '工區放流水');
+});
+
+test('#2 上游／下游這類通用測站名，前面加上表名的河川名，不同河川不會混在一起', () => {
+  const a = X.extractTable(riverTable('表2-5 本季(7~9月)虛構溪河川水監測結果'), {});
+  const b = X.extractTable(riverTable('表2.5-2 假想溪歷次河川水監測結果'), {});
+  assert.deepEqual(a.stations, ['虛構溪上游', '虛構溪下游']);
+  assert.deepEqual(b.stations, ['假想溪上游', '假想溪下游']);
+  assert.ok(a.recs.every(r => /^虛構溪/.test(r.st)));
+  // 標準值仍是整張表共用（之後匯入時逐站存，所以兩條河的標準各自分開）
+  assert.ok(a.stds.every(s => s.st === '*' || /^虛構溪/.test(s.st)));
+  // 一般測站名不加
+  const c = X.extractTable(tbl([
+    ['位置', '時間', '水溫', 'pH'], ['單位', '單位', '℃', '－'],
+    ['北岸工區', '115.08.03', '29.0', '7.8'], ['北岸工區', '115.09.03', '28.0', '7.6']
+  ], '表2-4 虛構溪河川水監測結果'), {});
+  assert.deepEqual(c.stations, ['北岸工區']);
+});
+
+test('#3 水質類別：地下水、飲用水、海域各自分類', () => {
+  assert.equal(X.guessCat('表2-7 監測井地下水監測結果'), '地下水');
+  assert.equal(X.guessCat('表2-8 飲用水水質檢測結果'), '飲用水');
+  assert.equal(X.guessCat('表2-9 自來水水質檢驗結果'), '飲用水');
+  assert.ok(X.CATS.indexOf('飲用水') >= 0);
+});
+
+test('#5 標準值寫「>2.0」「＞5.5」是下限（溶氧量），「<」「＜」是上限', () => {
+  assert.equal(X.stdMode('>2.0', '溶氧量'), 'min');
+  assert.equal(X.stdMode('＞5.5', '溶氧量'), 'min');
+  assert.equal(X.stdMode('> 2', '溶氧量'), 'min');
+  assert.equal(X.stdMode('<100', '懸浮固體'), 'max');
+  assert.equal(X.stdMode('＜25', '懸浮固體'), 'max');
+  assert.deepEqual(X.stdLines('>2.0'), [2]);
+});
+
+test('#6 只差上／下游、南／北岸的測站不列為「名稱很像」', () => {
+  const mk = (st, iso, v) => ({ pid: 'p', cat: '河川水', st, iso, dl: iso, note: '', item: 'pH', unit: '', raw: v, src: 'x', k: st + iso });
+  const recs = [mk('大安溪上游', '2026-01-01', '7.1'), mk('大安溪下游', '2026-01-01', '7.2'), mk('北岸工區', '2026-01-01', '7.0'), mk('南岸工區', '2026-01-01', '7.3'), mk('甲測站', '2026-01-01', '7'), mk('甲測站A', '2026-01-01', '7')];
+  const sim = Co.anomalies(recs, [], {}).filter(a => a.type === 'similar').map(a => a.names.join('/'));
+  assert.ok(!sim.includes('大安溪上游/大安溪下游'), sim.join(','));
+  assert.ok(!sim.includes('北岸工區/南岸工區'), sim.join(','));
+  assert.ok(sim.includes('甲測站/甲測站A'), '真的很像的仍要提醒：' + sim.join(','));
+});
+
+test('#7 「<2.0 (1.1)」＝低於定量極限 2.0（括號是實測參考值）', () => {
+  assert.equal(X.parseVal('<2.0 (1.1)').kind, 'lt');
+  assert.equal(X.parseVal('＜2.0（1.1）').kind, 'lt');
+});
+
+test('#9 測站歸入時同一天數值不同：異常檢查寫出兩站的值與保留哪一個', () => {
+  const r = { pid: 'p', cat: '工區放流水', st: '甲站', iso: '2026-01-01', dl: '115.01.01', note: '', item: 'pH', unit: '', raw: '7.0', src: '季報', k: 'p|工區放流水|甲站|2026-01-01||pH' };
+  const c = { k: r.k, cat: r.cat, old: '7.5', oldSrc: '月報', raw: '7.0', src: '季報', how: 'merge', from: '乙站', to: '甲站' };
+  const a = Co.anomalies([r], [], { conflicts: [c] }).filter(x => x.type === 'conflict');
+  assert.equal(a.length, 1);
+  assert.match(a[0].msg, /「乙站」歸入「甲站」/);
+  assert.match(a[0].msg, /目前用「甲站」的值/);
+});
+
+test('#17 兩站在相同日期的數值全部一樣：列入「數值完全一樣的測站」，不再重複列「名稱很像」', () => {
+  const mk = (st, iso, item, v) => ({ pid: 'p', cat: '營建噪音振動', st, iso, dl: iso, note: '', item, unit: '', raw: v, src: 'x', k: st + iso + item });
+  const recs = [];
+  [['2026-09-01', '60.1', '73.2', '36.3'], ['2026-09-21', '60.3', '71.2', '35.2']].forEach(([d, a, b, c]) => {
+    ['北岸工區周界', '工區周界(北岸)'].forEach(st => { recs.push(mk(st, d, 'Leq', a), mk(st, d, 'Lmax', b), mk(st, d, 'Lveq10', c)); });
+  });
+  recs.push(mk('工區周界', '2026-09-01', 'Leq', '60.1'), mk('工區周界', '2026-09-01', 'Lmax', '70'), mk('工區周界', '2026-09-01', 'Lveq10', '36.3'));
+  const an = Co.anomalies(recs, [], {});
+  const same = an.filter(a => a.type === 'sameval').map(a => a.names.join('/'));
+  assert.deepEqual(same, ['北岸工區周界/工區周界(北岸)']);
+  assert.match(an.find(a => a.type === 'sameval').msg, /115\.09\.01、115\.09\.21/);
+  assert.ok(!an.some(a => a.type === 'similar' && a.names.join('/') === '北岸工區周界/工區周界(北岸)'));
+  // 只有 1、2 個數值一樣不提醒（避免巧合）
+  const few = [mk('甲', '2026-01-01', 'pH', '7.0'), mk('乙', '2026-01-01', 'pH', '7.0'), mk('甲', '2026-01-01', 'SS', 'ND'), mk('乙', '2026-01-01', 'SS', 'ND')];
+  assert.equal(Co.anomalies(few, [], {}).filter(a => a.type === 'sameval').length, 0);
+});

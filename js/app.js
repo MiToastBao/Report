@@ -58,6 +58,7 @@
       return migrateStds().then(function () {
       ['stAlias', 'itemAlias', 'itemIgnore', 'itemPicked', 'ok', 'units', 'chartForm'].forEach(function (k) { if (!st.meta[k]) st.meta[k] = {}; });
       if (!st.meta.conflicts) st.meta.conflicts = [];
+      if (!st.meta.merges) st.meta.merges = [];
       if (!st.meta.log) st.meta.log = [];
       renderHeader();
       renderLog();
@@ -78,7 +79,9 @@
         }
       }
       var md = X.stdMode(s.text || '', s.item);
-      if (!s.mode || (s.by === 'auto' && s.mode !== md && !s.modeFixed)) { s.mode = md; s.modeFixed = 1; put.push(s); }
+      // v1.0.6：報告帶入的「>2.0」以前被判成上限（已經標過 modeFixed 的也要再修一次）
+      var gtFix = s.by === 'auto' && md === 'min' && s.mode === 'max' && /^\s*[>＞]/.test(s.text || '') && s.modeFixed !== 2;
+      if (!s.mode || gtFix || (s.by === 'auto' && s.mode !== md && !s.modeFixed)) { s.mode = md; s.modeFixed = gtFix ? 2 : 1; put.push(s); }
     });
     if (!put.length && !del.length) return Promise.resolve();
     return S.putStds(put, del).then(function () { return S.stds(st.pid); }).then(function (a) { st.stds = a; });
@@ -201,8 +204,10 @@
   }
   function applyNames(ds) {
     var cat = ds.cat;
-    ds.stations.forEach(function (s) { ds.stMap[s] = s ? mapName(cat, 'st', s) : (ds.stMap[s] || defaultStation(cat)); });
-    if (!ds.stations.length) ds.stMap[''] = ds.stMap[''] || defaultStation(cat);
+    // 報告沒寫測站時的預設名稱也套用測站歸類（例：「工區放流水」已歸入「北岸工區」）（v1.0.7）
+    var defSt = function () { var d = defaultStation(cat), al = (st.meta.stAlias || {})[cat] || {}; return al[d] || d; };
+    ds.stations.forEach(function (s) { ds.stMap[s] = s ? mapName(cat, 'st', s) : (ds.stMap[s] || defSt()); });
+    if (!ds.stations.length) ds.stMap[''] = ds.stMap[''] || defSt();
     ds.items.forEach(function (it) {
       ds.itemCat[it] = ds.itemCat[it] || cat;
       if (/營建/.test(cat) && /低頻/.test(it)) ds.itemCat[it] = '營建低頻噪音';
@@ -248,6 +253,12 @@
     next();
   }
   function existingIndex() { var m = {}; st.recs.forEach(function (r) { m[r.k] = r; }); return m; }
+  // v1.0.6：月報寫「假日」、季報同一筆寫「施工期間 假日」——備註只差施工階段、數值相同，是同一筆資料，
+  // 不可以變成兩筆（趨勢圖會在同一天畫出兩根一樣的長條）。只比對時去掉施工階段字樣，不改變已存的資料。
+  var RE_PHASE = /施工前|施工期間|施工中|施工後|營運前|營運期間|營運中|營運後/g;
+  function phaseKey(r) { return [r.cat, r.st, r.iso, r.item, String(r.note || '').replace(RE_PHASE, '').replace(/\s+/g, '')].join('|'); }
+  function phaseIndex() { var m = {}; st.recs.forEach(function (r) { var pk = phaseKey(r); if (!(pk in m)) m[pk] = r.raw; }); return m; }
+  function phaseDup(r, idx, pidx) { return !idx[r.k] && pidx[phaseKey(r)] === r.raw; }
   function dsRecords(ds, fileName) {
     var out = [];
     var dOverride = ds.dateText ? X.parseDate(ds.dateText) : null;
@@ -267,16 +278,16 @@
     });
     return out;
   }
-  function counts(list, idx) {
+  function counts(list, idx, pidx) {
     var c = { n: 0, same: 0, diff: 0 };
-    list.forEach(function (r) { var e = idx[r.k]; if (!e) c.n++; else if (e.raw === r.raw) c.same++; else c.diff++; });
+    list.forEach(function (r) { var e = idx[r.k]; if (pidx && phaseDup(r, idx, pidx)) c.same++; else if (!e) c.n++; else if (e.raw === r.raw) c.same++; else c.diff++; });
     return c;
   }
   function catSelect(v, attrs) {
     return '<select ' + attrs + '>' + (v ? '' : '<option value="">（請選擇類別）</option>') + allCats().map(function (c) { return opt(c, c, c === v); }).join('') + '<option value="__new">＋ 新增類別…</option></select>';
   }
   function renderImport() {
-    var area = $('importArea'), idx = existingIndex();
+    var area = $('importArea'), idx = existingIndex(), pidx = phaseIndex();
     if (!pending.length) { area.innerHTML = ''; $('importBar').hidden = true; return; }
     var tot = { n: 0, same: 0, diff: 0, tables: 0 }, seenAll = {};
     area.innerHTML = pending.map(function (f, fi) {
@@ -285,14 +296,15 @@
       if (f.error) return '<div class="file-card">' + head + '<div class="ds"><div class="err-box">' + esc(f.error) + '</div></div></div>';
       return '<div class="file-card">' + head + f.datasets.map(function (ds, di) {
         var list = ds.sel ? dsRecords(ds, f.name) : [];
-        var c = counts(list, idx);
+        var c = counts(list, idx, pidx);
         if (ds.sel) {
           tot.tables++;
           list.forEach(function (r) {
             var e = idx[r.k], prev = seenAll[r.k];
             if (prev && prev === r.raw) return;
+            if (!e && !prev && phaseDup(r, idx, pidx)) { tot.same++; seenAll[r.k] = r.raw; return; }
             if (!e && !prev) tot.n++; else if (e && e.raw === r.raw && !prev) tot.same++; else tot.diff++;
-            seenAll[r.k] = r.raw;
+            seenAll[r.k] = r.raw; var pk0 = phaseKey(r); if (!(pk0 in pidx)) pidx[pk0] = r.raw;
           });
         }
         var isos = ds.recs.map(function (r) { return r.iso; }).filter(Boolean).sort();
@@ -383,7 +395,8 @@
   });
   $('importClear').addEventListener('click', function () { if (confirm('清除這批尚未匯入的檔案？')) { pending = []; renderImport(); } });
   $('importGo').addEventListener('click', function () {
-    var idx = existingIndex(), put = [], conflicts = [], stdsPut = [], seen = {};
+    var idx = existingIndex(), pidx = phaseIndex(), put = [], conflicts = [], stdsPut = [], seen = {};
+    var twUpd = {}, pTwin = {}; st.recs.forEach(function (r) { var pk = phaseKey(r); if (!pTwin[pk]) pTwin[pk] = Object.assign({}, r); });
     var bid = 'b' + Date.now(), prev = {}, prevStd = {}, perFile = {};
     var stdIdx = {}; st.stds.forEach(function (s) { stdIdx[s.k] = s; });
     pending.forEach(function (f) {
@@ -393,6 +406,16 @@
           var e = idx[r.k];
           if (e && e.raw === r.raw) return;
           if (seen[r.k] && seen[r.k].raw === r.raw) return;
+          // 同一次匯入的兩個檔案數值不同（例：月報與季報）：後面的檔為準，列入異常（v1.0.7）
+          if (seen[r.k] && !e) conflicts.push({ k: r.k, cat: r.cat, old: seen[r.k].raw, oldSrc: seen[r.k].src, raw: r.raw, src: r.src, at: Date.now(), bid: bid });
+          if (phaseDup(r, idx, pidx) && !seen[r.k]) {          // 同一筆，只差施工階段備註（v1.0.6）
+            // 記下這份報告也有這筆，刪除另一份報告的資料時不會跟著不見（v1.0.7）
+            var tw = pTwin[phaseKey(r)];
+            if (tw && tw.src !== r.src) { tw.alsoSrc = (tw.alsoSrc || []).filter(function (x) { return x !== r.src; }).concat([r.src]); if (!seen[tw.k]) twUpd[tw.k] = tw; }
+            return;
+          }
+          var pk1 = phaseKey(r); if (!(pk1 in pidx)) pidx[pk1] = r.raw;
+          if (!pTwin[pk1]) pTwin[pk1] = r;
           if (e) { conflicts.push({ k: r.k, cat: r.cat, old: e.raw, oldSrc: e.src, raw: r.raw, src: r.src, at: Date.now(), bid: bid }); r.excl = e.excl; if (!prev[r.k]) prev[r.k] = e; }
           r.bid = bid; seen[r.k] = r; put.push(r);
         });
@@ -436,7 +459,7 @@
     var withUndo = st.meta.log.filter(function (l) { return l.id && !l.noUndo; }), drop = withUndo.slice(0, Math.max(0, withUndo.length - 30));
     drop.forEach(function (l) { l.noUndo = 1; });
     var n = put.length;
-    Promise.all([S.putRecs(put), S.putStds(stdsPut), S.setMeta(st.pid, 'undo|' + bid, { prev: prev, prevStd: prevStd }), drop.length ? S.delMeta(st.pid, drop.map(function (l) { return 'undo|' + l.id; })) : null, saveMeta()]).then(function () { return loadProject(st.pid); }).then(function () {
+    Promise.all([S.putRecs(put.concat(Object.keys(twUpd).filter(function (k) { return !byK[k]; }).map(function (k) { return twUpd[k]; }))), S.putStds(stdsPut), S.setMeta(st.pid, 'undo|' + bid, { prev: prev, prevStd: prevStd }), drop.length ? S.delMeta(st.pid, drop.map(function (l) { return 'undo|' + l.id; })) : null, saveMeta()]).then(function () { return loadProject(st.pid); }).then(function () {
       pending = []; renderImport(); renderLog();
       $('importArea').innerHTML = '<div class="ok-box">✔ 已匯入 ' + n + ' 筆數值' + (conflicts.length ? '，其中 ' + conflicts.length + ' 筆與既有資料數值不同、已改用新檔（已列入「資料異常檢查」）' : '') + '。可以到「資料異常檢查」確認，或直接到「趨勢圖與報告表格」產生圖表。</div>';
       toast('匯入完成');
@@ -477,7 +500,11 @@
       list.forEach(function (r) {
         var p = r.bid && U[r.bid] && U[r.bid].prev[r.k];
         if (p && p.bid && gone[p.bid]) p = null; // 舊值來自已經復原的那次匯入，不再放回
-        if (p) { put.push(p); restored++; } else del.push(r.k);
+        if (p) {   // 舊值的測站之後被歸入別站：放回歸入後的測站（v1.0.7）
+          var al = (st.meta.stAlias || {})[p.cat] || {};
+          if (al[p.st] && al[p.st] !== p.st) { p = Object.assign({}, p, { st: al[p.st] }); p.k = S.recKey(p); if (p.k !== r.k) del.push(r.k); }
+          put.push(p); restored++;
+        } else del.push(r.k);
       });
       return S.putRecs(put, del).then(function () { return { del: del.length, restored: restored, U: U }; });
     });
@@ -489,7 +516,11 @@
       var recs = st.recs.filter(function (r) { return r.bid === l.id; });
       if (!confirm('復原 ' + fmtTime(l.at) + ' 的匯入？\n\n這次匯入的 ' + recs.length + ' 筆資料會刪除；若當時蓋掉了舊值，會把舊值放回去。這次匯入帶進來的標準值也會一併復原（自行修改過的不動）。匯入後在「資料檢視」手動改過的數值也會一起移除。')) return;
       var stds = st.stds.filter(function (s) { return s.bid === l.id && s.by !== 'user'; });
-      revertRecs(recs).then(function (res) {
+      // 其他資料上「這份報告也有」的註記一併拿掉（同一檔案在別次匯入還在的不動）（v1.0.7）
+      var other = {}; st.meta.log.forEach(function (x) { if (x !== l && !x.undone) (x.files || []).forEach(function (f) { other[f] = 1; }); });
+      var strip = (l.files || []).filter(function (f) { return !other[f]; }), alsoFix = [];
+      if (strip.length) st.recs.forEach(function (r) { if (r.bid !== l.id && r.alsoSrc && r.alsoSrc.some(function (f) { return strip.indexOf(f) >= 0; })) { var o = Object.assign({}, r); o.alsoSrc = r.alsoSrc.filter(function (f) { return strip.indexOf(f) < 0; }); alsoFix.push(o); } });
+      (alsoFix.length ? S.putRecs(alsoFix) : Promise.resolve()).then(function () { return revertRecs(recs); }).then(function (res) {
         return S.getMeta(st.pid, 'undo|' + l.id, null).then(function (ud) {
           var ps = (ud && ud.prevStd) || {}, sPut = [], sDel = [];
           stds.forEach(function (s) { if (ps[s.k]) sPut.push(ps[s.k]); else sDel.push(s.k); });
@@ -501,9 +532,16 @@
         .catch(function (err) { toast('復原失敗：' + err.message, true); });
     } else if (d) {
       var name = d.getAttribute('data-delsrc');
-      var list = st.recs.filter(function (r) { return r.src === name; });
-      if (!confirm('刪除「' + name + '」匯入的 ' + list.length + ' 筆資料？\n\n若匯入時蓋掉了舊值，會把舊值放回去。標準值不會刪除（可到「測項與標準值」修改）。')) return;
-      revertRecs(list).then(function (res) {
+      // 另一份報告也有的資料（測站歸入合成一筆、月報與季報只差施工階段）：改記在另一份報告，不刪（v1.0.7）
+      var keep = [];
+      st.recs.forEach(function (r) {
+        var also = r.alsoSrc || [];
+        if (r.src === name && also.length) { var o = Object.assign({}, r, { src: also[0] }); o.alsoSrc = also.slice(1); keep.push(o); }
+        else if (also.indexOf(name) >= 0) { var o2 = Object.assign({}, r); o2.alsoSrc = also.filter(function (x) { return x !== name; }); keep.push(o2); }
+      });
+      var list = st.recs.filter(function (r) { return r.src === name && !(r.alsoSrc && r.alsoSrc.length); });
+      if (!confirm('刪除「' + name + '」匯入的 ' + list.length + ' 筆資料？\n\n若匯入時蓋掉了舊值，會把舊值放回去。標準值不會刪除（可到「測項與標準值」修改）。' + (keep.length ? '\n另有 ' + keep.length + ' 筆其他報告（例如季報）也有同一筆，會保留，只拿掉「' + name + '」的來源註記。' : ''))) return;
+      (keep.length ? S.putRecs(keep) : Promise.resolve()).then(function () { return revertRecs(list); }).then(function (res) {
         st.meta.conflicts = st.meta.conflicts.filter(function (c) { return c.src !== name; });
         return saveMeta().then(function () { return loadProject(st.pid); }).then(function () { renderLog(); toast('已刪除 ' + res.del + ' 筆' + (res.restored ? '、放回舊值 ' + res.restored + ' 筆' : '')); });
       }).catch(function (err) { toast('刪除失敗：' + err.message, true); });
@@ -540,7 +578,7 @@
     $('dItem').innerHTML = opt('', '全部測項', !itv) + its.map(function (s) { return opt(s, s, s === itv); }).join('');
     $('dPeriod').innerHTML = periodOptions(pv);
     var p = periodOf(pv), q = $('dQ').value.trim();
-    list = list.filter(function (r) { return (!stv || r.st === stv) && (!itv || r.item === itv) && Co.inPeriod(r.iso, p) && (!q || (r.raw + ' ' + r.src + ' ' + r.note + ' ' + r.dl).indexOf(q) >= 0); });
+    list = list.filter(function (r) { return (!stv || r.st === stv) && (!itv || r.item === itv) && Co.inPeriod(r.iso, p) && (!q || (r.raw + ' ' + r.src + ' ' + r.note + ' ' + r.dl + ' ' + Co.rocDate(r.iso)).indexOf(q) >= 0); });
     list.sort(function (a, b) { return a.cat < b.cat ? -1 : a.cat > b.cat ? 1 : a.st < b.st ? -1 : a.st > b.st ? 1 : a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : a.item < b.item ? -1 : 1; });
     var per = 400, pages = Math.max(1, Math.ceil(list.length / per));
     if (dPage >= pages) dPage = 0;
@@ -604,7 +642,7 @@
 
   /* ================= 異常檢查 ================= */
   var cFilter = '', cShowOk = false, lastAnoms = [];
-  var TYPE_LABEL = { text: '判讀不出的數值', outlier: '異常高低值', conflict: '兩份檔案數值不同', missing: '缺測項', similar: '名稱很像的測站', unit: '單位不一致', over: '超過標準值（提示）' };
+  var TYPE_LABEL = { text: '判讀不出的數值', outlier: '異常高低值', conflict: '兩份檔案數值不同', missing: '缺測項', similar: '名稱很像的測站', sameval: '數值完全一樣的測站', unit: '單位不一致', over: '超過標準值（提示）' };
   function runCheck() { lastAnoms = Co.anomalies(st.recs, st.stds, { ok: cShowOk ? {} : st.meta.ok, conflicts: st.meta.conflicts }); updateBadge(); return lastAnoms; }
   function updateBadge() {
     var n = st.pid ? Co.anomalies(st.recs, st.stds, { ok: st.meta.ok, conflicts: st.meta.conflicts }).filter(function (a) { return a.level !== 'info'; }).length : 0;
@@ -622,7 +660,8 @@
       var where = a.rec ? a.cat + '｜' + a.rec.st + '｜' + a.rec.dl + (a.rec.note ? '（' + a.rec.note + '）' : '') + '｜' + a.rec.item : a.type === 'missing' ? a.cat + '｜' + a.st + '｜' + a.dl : a.cat;
       var act = '';
       if (a.rec) act = '<input class="cell" data-edit="' + esc(a.rec.k) + '" value="' + esc(a.rec.raw) + '" title="直接修改數值">' + (a.rec.excl ? '<span class="pill same">已不採用</span>' : '');
-      if (a.type === 'similar') act = '<button class="btn small" data-merge="' + i + '" data-to="0">合併為「' + esc(a.names[0]) + '」</button><button class="btn small" data-merge="' + i + '" data-to="1">合併為「' + esc(a.names[1]) + '」</button>';
+      if (a.type === 'sameval') act = '<button class="btn small" data-merge="' + i + '" data-to="0">同一站，歸入「' + esc(a.names[0]) + '」</button><button class="btn small" data-merge="' + i + '" data-to="1">同一站，歸入「' + esc(a.names[1]) + '」</button><button class="btn small" data-look="' + i + '">到資料檢視核對</button><button class="btn small" data-notsame="' + i + '">不是同一站，數值無誤</button>';
+      if (a.type === 'similar') act = '<button class="btn small" data-merge="' + i + '" data-to="0">歸入「' + esc(a.names[0]) + '」</button><button class="btn small" data-merge="' + i + '" data-to="1">歸入「' + esc(a.names[1]) + '」</button><button class="btn small" data-notsame="' + i + '">不是同一站</button>';
       return '<div class="anom ' + a.level + '"><input type="checkbox" data-id="' + esc(a.id) + '" data-rk="' + esc(a.rec ? a.rec.k : '') + '"><div class="a-main"><div class="a-where">' + esc(TYPE_LABEL[a.type]) + '・' + esc(where) + (a.rec && a.rec.src ? '・' + esc(a.rec.src) : '') + '</div><div class="a-msg">' + esc(a.msg) + '</div></div><div class="a-act">' + act + '</div></div>';
     }).join('') + (list.length > 600 ? '<div class="muted small">只顯示前 600 項</div>' : '');
     $('cAll').checked = false;
@@ -633,22 +672,107 @@
   $('cList').addEventListener('change', function (e) { var k = e.target.getAttribute('data-edit'); if (k) editValue(k, e.target.value).then(function () { e.target.classList.add('changed'); }); });
   $('cList').addEventListener('keydown', function (e) { if (e.key === 'Enter' && e.target.classList.contains('cell')) e.target.blur(); });
   $('cList').addEventListener('click', function (e) {
+    var lk = e.target.closest('[data-look]');
+    if (lk) {   // 列出兩站在那一天的資料（v1.0.8）
+      var la = lastAnoms.filter(function (x) { return !cFilter || x.type === cFilter; })[+lk.getAttribute('data-look')]; if (!la) return;
+      go('data'); $('dCat').value = la.cat; renderData();
+      $('dSt').value = ''; $('dItem').value = ''; $('dSrc').value = ''; $('dPeriod').value = ''; $('dQ').value = la.days[0] || '';
+      renderData(); toast('列出 ' + (la.days[0] || '') + ' 這一天的資料' + (la.days.length > 1 ? '（共 ' + la.days.length + ' 天，可在搜尋欄改日期）' : '') + '，請對照報告核對兩站數值');
+      return;
+    }
+    var ns = e.target.closest('[data-notsame]');
+    if (ns) {
+      var sa = lastAnoms.filter(function (x) { return !cFilter || x.type === cFilter; })[+ns.getAttribute('data-notsame')]; if (!sa) return;
+      st.meta.ok[sa.id] = Date.now();
+      saveMeta().then(function () { renderCheck(); toast('已記住「' + sa.names[0] + '」與「' + sa.names[1] + '」不是同一站，不再提醒'); });
+      return;
+    }
     var b = e.target.closest('[data-merge]'); if (!b) return;
-    var a = runCheck().filter(function (x) { return x.type === 'similar'; });
+
     var shown = lastAnoms.filter(function (x) { return !cFilter || x.type === cFilter; });
     var an = shown[+b.getAttribute('data-merge')]; if (!an) return;
     var to = an.names[+b.getAttribute('data-to')], from = an.names[1 - +b.getAttribute('data-to')];
-    if (!confirm('把「' + from + '」的資料全部改成測站「' + to + '」？之後匯入「' + from + '」也會自動改名。')) return;
-    renameStation(an.cat, from, to).then(renderCheck);
+    if (!confirm('把「' + from + '」的資料全部歸入測站「' + to + '」？之後匯入「' + from + '」也會自動歸入。\n（可以在「測項與標準值」頁的「測站名稱與歸類」取消歸入）')) return;
+    mergeStation(an.cat, from, to).then(function (r) { renderCheck(); toast(mergeMsg(r, from, to)); });
   });
-  function renameStation(cat, from, to) {
-    var ch = [], del = [];
-    st.recs.forEach(function (r) { if (r.cat === cat && r.st === from) { del.push(r.k); var o = Object.assign({}, r, { st: to }); o.k = S.recKey(o); ch.push(o); } });
-    var sch = [], sdel = [];
-    st.stds.forEach(function (s) { if (s.cat === cat && s.st === from) { sdel.push(s.k); var o = Object.assign({}, s, { st: to }); o.k = S.stdKey(o); sch.push(o); } });
+  // 測站歸入／改名（v1.0.7）：把 from 的資料、標準值改到 to；之後匯入 from 自動改成 to；可以取消歸入還原
+  // 同一天同一測項兩站都有值：一樣就合成一筆；不一樣保留 to 的值，列入異常檢查（季報來自月報，不同一定要查）
+  function mergeStation(cat, from, to) {
+    var idx = {}; st.recs.forEach(function (r) { idx[r.k] = r; });
+    var mid = 'm' + Date.now(), now = Date.now();
+    var put = [], del = [], moved = [], confs = [], same = 0, tOrig = {}, tPut = {};
+    st.recs.forEach(function (r) {
+      if (r.cat !== cat || r.st !== from) return;
+      del.push(r.k); moved.push(r);
+      var o = Object.assign({}, r, { st: to }); o.k = S.recKey(o);
+      var e = idx[o.k];
+      if (e) {
+        if (e.raw === o.raw) {   // 合成一筆，來源報告記在目標那筆上（取消歸入時還原）
+          same++;
+          if (!tOrig[e.k]) tOrig[e.k] = Object.assign({}, e);
+          var t = tPut[e.k] = tPut[e.k] || Object.assign({}, e);
+          t.alsoSrc = (t.alsoSrc || []).concat([o.src].concat(o.alsoSrc || [])).filter(function (x, i, a) { return x && x !== t.src && a.indexOf(x) === i; });
+          return;
+        }
+        confs.push({ k: o.k, cat: cat, old: o.raw, oldSrc: o.src, raw: e.raw, src: e.src, at: now, mid: mid, how: 'merge', from: from, to: to });
+        return;
+      }
+      put.push(o);
+    });
+    var sPut = [], sDel = [], sMoved = [], sDrop = 0;
+    var hasTo = {}; st.stds.forEach(function (x) { if (x.cat === cat && x.st === to) hasTo[x.item] = 1; });
+    st.stds.forEach(function (x) {
+      if (x.cat !== cat || x.st !== from) return;
+      sDel.push(x.k); sMoved.push(x);
+      if (hasTo[x.item]) { sDrop++; return; }
+      var o = Object.assign({}, x, { st: to }); o.k = S.stdKey(o); sPut.push(o);
+    });
     var al = st.meta.stAlias[cat] = st.meta.stAlias[cat] || {};
+    var alPrev = {}; Object.keys(al).forEach(function (k) { alPrev[k] = al[k]; });
     al[from] = to; Object.keys(al).forEach(function (k) { if (al[k] === from) al[k] = to; });
-    return Promise.all([S.putRecs(ch, del), S.putStds(sch, sdel), saveMeta()]).then(function () { return loadProject(st.pid); }).then(function () { toast('已合併測站'); });
+    delete al[to];
+    // 異常檢查「名稱很像」與舊的衝突紀錄改到新測站
+    st.meta.conflicts.forEach(function (c) { if (c.cat === cat && c.k && c.k.split('|')[2] === from) { var a = c.k.split('|'); a[2] = to; (c.mk = c.mk || {})[mid] = c.k; c.k = a.join('|'); } });
+    st.meta.conflicts = st.meta.conflicts.concat(confs).slice(-1000);
+    st.meta.merges.push({ id: mid, cat: cat, from: from, to: to, at: now, n: moved.length, same: same, conf: confs.length, sDrop: sDrop });
+    var undo = { put: put.map(function (r) { return r.k; }), moved: moved, sPut: sPut.map(function (x) { return x.k; }), sMoved: sMoved, alPrev: alPrev, tOrig: Object.keys(tOrig).map(function (k) { return tOrig[k]; }) };
+    put = put.concat(Object.keys(tPut).map(function (k) { return tPut[k]; }));
+    return Promise.all([S.putRecs(put, del), S.putStds(sPut, sDel), S.setMeta(st.pid, 'merge|' + mid, undo), saveMeta()])
+      .then(function () { return loadProject(st.pid); })
+      .then(function () { return { n: moved.length, same: same, conf: confs.length, sDrop: sDrop }; });
+  }
+  function mergeBlocked(m) {   // 歸入之後 to 又被歸入別站，要先取消後面那次
+    var later = st.meta.merges.filter(function (x) { return x.at > m.at && x.cat === m.cat && (x.from === m.to || x.to === m.from || x.from === m.from); });
+    return later.length ? later[later.length - 1] : null;
+  }
+  function unmergeStation(id) {
+    var m = st.meta.merges.filter(function (x) { return x.id === id; })[0]; if (!m) return Promise.resolve();
+    return S.getMeta(st.pid, 'merge|' + id, null).then(function (u) {
+      if (!u) throw new Error('找不到還原資料');
+      var cur = {}; st.recs.forEach(function (r) { cur[r.k] = r; });
+      // 歸入後又在目標測站修改過的值，跟著還原
+      var moved = u.moved.map(function (r) {
+        var o = Object.assign({}, r, { st: m.to }); o.k = S.recKey(o);
+        var c = cur[o.k];
+        if (c && u.put.indexOf(o.k) >= 0) { var b = Object.assign({}, r); b.raw = c.raw; b.excl = c.excl; return b; }
+        return r;
+      });
+      var delK = u.put.filter(function (k) { return cur[k]; });
+      var al = st.meta.stAlias[m.cat] = st.meta.stAlias[m.cat] || {};
+      var ap = u.alPrev || {};
+      // 只還原這次歸入改過的別名，其他測站之後的歸類不動
+      if (ap[m.from] != null) al[m.from] = ap[m.from]; else delete al[m.from];
+      Object.keys(ap).forEach(function (k) { if (ap[k] === m.from && al[k] === m.to) al[k] = m.from; });
+      if (ap[m.to] != null && al[m.to] == null) al[m.to] = ap[m.to];
+      st.meta.conflicts = st.meta.conflicts.filter(function (c) { return c.mid !== id; });
+      st.meta.conflicts.forEach(function (c) { if (c.mk && c.mk[id]) { c.k = c.mk[id]; delete c.mk[id]; } });   // 歸入時改到新測站的舊衝突紀錄改回來
+      st.meta.merges = st.meta.merges.filter(function (x) { return x.id !== id; });
+      var restoreT = (u.tOrig || []).filter(function (r) { return cur[r.k]; }).map(function (r) { var c = cur[r.k], o = Object.assign({}, c); if (r.alsoSrc) o.alsoSrc = r.alsoSrc; else delete o.alsoSrc; return o; });
+      return Promise.all([S.putRecs(moved.concat(restoreT), delK), S.putStds(u.sMoved, u.sPut), S.delMeta(st.pid, ['merge|' + id]), saveMeta()]);
+    }).then(function () { return loadProject(st.pid); });
+  }
+  function mergeMsg(r, from, to) {
+    return '已把「' + from + '」的 ' + r.n + ' 筆資料歸入「' + to + '」' + (r.same ? '（其中 ' + r.same + ' 筆兩站數值相同，合成一筆）' : '') + (r.conf ? '；' + r.conf + ' 筆同一天數值不同，保留「' + to + '」的值並列入資料異常檢查' : '') + (r.sDrop ? '；' + r.sDrop + ' 筆標準值「' + to + '」已有，沿用「' + to + '」的' : '');
   }
   $('cOk').addEventListener('click', function () {
     var ids = Array.prototype.map.call($('cList').querySelectorAll('input[data-id]:checked'), function (c) { return c.getAttribute('data-id'); });
@@ -673,7 +797,7 @@
     var list = st.stds.filter(function (s) { return s.cat === cat; });
     var groups = {}, order = [];
     list.forEach(function (s) {
-      var g = s.item + '\u0001' + (s.from || '') + '\u0001' + (s.to || '') + '\u0001' + (s.m1 || '') + '-' + (s.m2 || '') + '\u0001' + (s.mode || '') + '\u0001' + s.text;
+      var g = s.item + '\u0001' + (s.from || '') + '\u0001' + (s.to || '') + '\u0001' + (s.m1 || '') + '-' + (s.m2 || '') + '\u0001' + (s.mode || '') + '\u0001' + s.text + '\u0001' + (s.label || '');   // v1.0.6：說明不同（例如丁類、乙類）不合併成一列
       if (!groups[g]) { groups[g] = { item: s.item, text: s.text, lines: s.lines, label: s.label, by: s.by, from: s.from || '', to: s.to || '', m1: s.m1 || 0, m2: s.m2 || 0, mode: s.mode || X.stdMode(s.text || '', s.item), keys: [], sts: [] }; order.push(g); }
       groups[g].keys.push(s.k); groups[g].sts.push(s.st === '*' ? '全部測站' : s.st);
       if (s.by === 'user') groups[g].by = 'user';
@@ -709,7 +833,58 @@
         '<td>' + esc(g.lines.join('、')) + '</td><td class="st-cell">' + esc(g.sts.join('、')) + '</td><td class="note-cell">' + (g.label ? esc(g.label) + '<br>' : '') + '<span class="small muted">' + (g.by === 'user' ? '自行設定' : '報告帶入') + '</span></td><td><button class="btn small danger" data-sgdel="' + i + '">刪除</button></td></tr>';
     }).join('') + '</tbody></table>' : '<div class="empty">這個類別還沒有標準值，按「＋ 新增一筆標準值」設定</div>';
     renderItemTable(cat, cg);
+    renderStationTable(cat);
   }
+  // 測站名稱與歸類（v1.0.7）
+  function renderStationTable(cat) {
+    var by = {};
+    st.recs.forEach(function (r) {
+      if (r.cat !== cat) return;
+      var b = by[r.st] = by[r.st] || { n: 0, d1: r.iso, d2: r.iso, src: {} };
+      b.n++; if (r.iso < b.d1) b.d1 = r.iso; if (r.iso > b.d2) b.d2 = r.iso; if (r.src) b.src[r.src] = 1; (r.alsoSrc || []).forEach(function (x) { b.src[x] = 1; });
+    });
+    var sts = Object.keys(by).sort(function (a, b) { return by[a].d1 < by[b].d1 ? -1 : by[a].d1 > by[b].d1 ? 1 : zhSort(a, b); });
+    $('stTable').innerHTML = sts.length ? '<table class="t st-t"><thead><tr><th>測站</th><th>筆數</th><th>監測期間</th><th>來源報告</th><th>歸入其他測站／改名</th></tr></thead><tbody>' + sts.map(function (s) {
+      var b = by[s], srcs = Object.keys(b.src).sort(zhSort);
+      return '<tr><td>' + esc(s) + '</td><td class="num">' + b.n + '</td><td class="nowrap">' + esc(Co.rocDate(b.d1)) + (b.d2 !== b.d1 ? '～' + esc(Co.rocDate(b.d2)) : '') + '</td><td class="small">' + esc(srcs.slice(0, 4).join('、')) + (srcs.length > 4 ? ' 等 ' + srcs.length + ' 份' : '') + '</td>' +
+        '<td><select class="cell" data-mto="' + esc(s) + '"><option value="">維持獨立</option>' + sts.filter(function (x) { return x !== s; }).map(function (x) { return '<option value="' + esc(x) + '">歸入「' + esc(x) + '」</option>'; }).join('') + '<option value="__new">改成其他名稱…</option></select>' +
+        '<span class="mnew" hidden><input class="cell" style="width:160px;text-align:left" data-mname="' + esc(s) + '" placeholder="新名稱"><button class="btn small" data-mgo="' + esc(s) + '">確定</button></span></td></tr>';
+    }).join('') + '</tbody></table>' : '<div class="empty">這個類別還沒有資料</div>';
+    var ms = st.meta.merges.filter(function (m) { return m.cat === cat; });
+    $('mergeList').innerHTML = ms.length ? '<h4 class="mt">已歸入的測站</h4><table class="t"><thead><tr><th>原測站</th><th></th><th>歸入</th><th>時間</th><th>說明</th><th></th></tr></thead><tbody>' + ms.slice().reverse().map(function (m) {
+      var bl = mergeBlocked(m);
+      return '<tr><td>' + esc(m.from) + '</td><td>→</td><td>' + esc(m.to) + '</td><td class="nowrap small">' + esc(fmtTime(m.at)) + '</td><td class="small">' + m.n + ' 筆' + (m.same ? '（' + m.same + ' 筆數值相同，合成一筆）' : '') + (m.conf ? '；' + m.conf + ' 筆數值不同' : '') + '</td><td>' +
+        (bl ? '<span class="small muted">要先取消「' + esc(bl.from) + ' → ' + esc(bl.to) + '」</span>' : '<button class="btn small" data-unmerge="' + esc(m.id) + '">取消歸入</button>') + '</td></tr>';
+    }).join('') + '</tbody></table>' : '';
+  }
+  function doMerge(cat, from, to) {
+    var exists = st.recs.some(function (r) { return r.cat === cat && r.st === to; });
+    var q = exists ? '把「' + from + '」的資料全部歸入「' + to + '」？\n趨勢圖會畫成同一站；之後匯入「' + from + '」也會自動歸入。\n同一天同一測項兩站數值不同時，保留「' + to + '」的值並列入資料異常檢查。\n歸錯可以在「已歸入的測站」取消。'
+      : '把測站「' + from + '」改名為「' + to + '」？之後匯入「' + from + '」也會自動改名。\n改錯可以在「已歸入的測站」取消。';
+    if (!confirm(q)) { renderStd(); return; }
+    mergeStation(cat, from, to).then(function (r) { renderStd(); updateBadge(); toast(exists ? mergeMsg(r, from, to) : '已把「' + from + '」改名為「' + to + '」'); }).catch(function (e) { toast('失敗：' + e.message, true); });
+  }
+  $('stTable').addEventListener('change', function (e) {
+    var from = e.target.getAttribute('data-mto'); if (from == null) return;
+    var v = e.target.value, box = e.target.parentNode.querySelector('.mnew');
+    box.hidden = v !== '__new';
+    if (v === '__new') { box.querySelector('input').focus(); return; }
+    if (v) doMerge($('sCat').value, from, v);
+  });
+  function goNewName(from) {
+    var inp = $('stTable').querySelector('input[data-mname="' + (window.CSS && CSS.escape ? CSS.escape(from) : from) + '"]'), to = inp ? inp.value.trim() : '';
+    if (!to) return toast('請輸入新名稱', true);
+    if (to === from) return;
+    doMerge($('sCat').value, from, to);
+  }
+  $('stTable').addEventListener('click', function (e) { var b = e.target.closest('[data-mgo]'); if (b) goNewName(b.getAttribute('data-mgo')); });
+  $('stTable').addEventListener('keydown', function (e) { var n = e.target.getAttribute('data-mname'); if (n != null && e.key === 'Enter') { e.preventDefault(); goNewName(n); } });
+  $('mergeList').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-unmerge]'); if (!b) return;
+    var m = st.meta.merges.filter(function (x) { return x.id === b.getAttribute('data-unmerge'); })[0]; if (!m) return;
+    if (!confirm('取消「' + m.from + ' → ' + m.to + '」？\n「' + m.from + '」的資料與標準值會還原成獨立測站，之後匯入也不再自動歸入。')) return;
+    unmergeStation(m.id).then(function () { renderStd(); updateBadge(); toast('已取消歸入，「' + m.from + '」還原成獨立測站'); }).catch(function (e2) { toast('失敗：' + e2.message, true); });
+  });
   function renderItemTable(cat, cg) {
     var units = st.meta.units[cat] || {};
     $('iTable').innerHTML = cg.items.length ? '<table class="t"><thead><tr><th>測項名稱</th><th>改名為</th><th>單位</th><th>筆數</th></tr></thead><tbody>' + cg.items.map(function (it) {

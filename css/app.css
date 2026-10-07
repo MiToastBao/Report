@@ -314,3 +314,8 @@ table.mv-t th:first-child { background: #eef2f9; }
 .g-legend span[class^="g-"] { padding: 2px 8px; border-radius: 6px; border: 1px solid #e3e8f1; }
 .g-legend .g-own { background: #e6f4ea; } .g-legend .g-miss { background: #fdecec; color: #b42318; } .g-legend .g-all { background: #fff; }
 .std-grid td[data-gst] { cursor: pointer; } .std-grid td[data-gst]:hover { outline: 2px solid var(--accent); outline-offset: -2px; }
+.nowrap { white-space: nowrap; }
+.st-t select.cell { min-width: 200px; }
+.mnew { display: inline-flex; gap: 6px; margin-left: 6px; align-items: center; }
+.mnew[hidden] { display: none; }
+#mergeList h4 { margin: 18px 0 8px; font-size: 15px; }

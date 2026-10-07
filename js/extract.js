@@ -53,7 +53,8 @@
     if (RE_BLANK.test(s)) return { kind: 'blank', num: null };
     s = s.replace(/[*＊#]+$/, '');
     if (/^N\.?D\.?(?:[<(（].*)?$/i.test(s) || s === '未檢出' || s === '未檢測出') return { kind: 'nd', num: null };
-    if (/^[<＜≦≤][\d.]+$/.test(s)) return { kind: 'lt', num: null };
+    // 「<2.0(1.1)」：低於定量極限 2.0，括號裡是儀器讀值（參考用）——當成 <2.0（v1.0.6）
+    if (/^[<＜≦≤][\d.]+(?:[(（][\d.]+[)）])?$/.test(s)) return { kind: 'lt', num: null };
     if (/^[>＞≧≥][\d.]+$/.test(s)) return { kind: 'gt', num: null };
     var sci = /^([+-]?\d*\.?\d+)[×xX\*]10\^?([+-]?\d{1,2})$/.exec(s);
     if (sci) return { kind: 'num', num: +sci[1] * Math.pow(10, +sci[2]) };
@@ -82,7 +83,8 @@
   // 判定方式：max＝上限（不可超過，預設）、min＝下限（不可低於，例如溶氧 2 以上）、range＝範圍（例如 pH 6~9）
   function stdMode(text, item) {
     var s = norm(text), n = stdLines(s).length;
-    if (/以上|≧|≥|>=|不得低於|不低於|大於/.test(s)) return 'min';
+    // v1.0.6：「>2.0」「＞5.5」（溶氧量的寫法）也是下限；以前沒認，溶氧 4.7 被當成超過上限 2
+    if (/以上|≧|≥|>=|不得低於|不低於|大於/.test(s) || /^\s*[>＞]/.test(s)) return 'min';
     if (/\d\s*(?:[~～至]|[-－–]\s*\d)/.test(s) || /範圍|之間/.test(s)) return 'range';
     // 兩個值：pH 一定是範圍；「6.0 | 9.0」這種上下限分兩格的也是範圍；「35/38」斜線是多個值（取較寬鬆的當上限）
     if (n === 2 && (/^\s*pH/i.test(item || '') || !/[\/／]/.test(s))) return 'range';
@@ -121,12 +123,13 @@
   var RE_HOUR = /^\d{1,2}\s*[:：]?\s*\d{0,2}\s*[~～\-－–至]\s*\d{1,2}\s*[:：]?\s*\d{0,2}$/;
 
   /* ---------- 類別 ---------- */
-  var CATS = ['空氣品質', '噪音振動', '營建噪音振動', '營建低頻噪音', '工區放流水', '河川水', '地下水', '土壤', '海域水質', '海域底質'];
+  var CATS = ['空氣品質', '噪音振動', '營建噪音振動', '營建低頻噪音', '工區放流水', '河川水', '地下水', '飲用水', '土壤', '海域水質', '海域底質'];
   var CAT_RULES = [
     [/低頻/, '營建低頻噪音'],
     [/營建.{0,6}(噪音|振動)|(噪音|振動).{0,6}營建|固定音源|工區周界/, '營建噪音振動'],
     [/底質|底泥/, '海域底質'],
     [/海域|海水/, '海域水質'],
+    [/飲用水|自來水|淨水場|淨水廠/, '飲用水'],
     [/放流水|放流口/, '工區放流水'],
     [/河川|溪|排水路|橋.{0,3}水質/, '河川水'],
     [/地下水|監測井/, '地下水'],
@@ -137,6 +140,39 @@
   function guessCat(text) {
     for (var i = 0; i < CAT_RULES.length; i++) if (CAT_RULES[i][0].test(text)) return CAT_RULES[i][1];
     return '';
+  }
+  // v1.0.6：依線索的可靠程度逐一判斷，前面的有結果就用前面的。
+  // 以前把表名、表頭、前後文、檔名接成一串一起比對，規則又是「放流水」排在「河川」前面，
+  // 於是表名明寫「大安溪河川水監測結果」、前一段說明文字提到「工區放流水」時，整張表被分到工區放流水。
+  function guessCatOrdered(texts) {
+    for (var i = 0; i < texts.length; i++) {
+      var c = texts[i] ? guessCat(texts[i]) : '';
+      if (c) return c;
+    }
+    return '';
+  }
+
+  // v1.0.6：「上游、下游」這類只說位置的測站名，各條河川都會用。前面加上表名裡的河川／地點名稱
+  // （大安溪上游、烏眉溪上游），否則兩條河的資料會混成同一個測站，標準值（丁類／乙類）也會互相蓋掉。
+  var RE_GENERIC_POS = /^(上游|中游|下游|上游處|下游處|上游端|下游端|上風處?|下風處?|進流口?|出流口?|入流口?|左岸|右岸|河口|橋上|橋下)$/;
+  function placeOf(cap) {
+    var c = norm(cap).replace(/^表\s*[\dA-Za-z一二三四五六七八九十.\-－–]+\s*/, '')
+      .replace(/[(（][^)）]*[)）]/g, '')
+      .replace(/^(本季|本月|本年度|本年|本期|歷次|歷季|各)+/, '');
+    var m = /^(.{1,12}?)(?:歷次|歷季|本季|各次)?(河川水|河川|溪水|水質|地下水|地面水|監測井|放流水|海域|底質)/.exec(c);
+    if (!m) return '';
+    var p = m[1].replace(/(歷次|歷季|本季|之|的)$/, '');
+    if (p.length < 2 || GENERIC_ST.test(p)) return '';
+    return p;
+  }
+  function prefixGenericStations(ds, cap) {
+    var place = placeOf(cap);
+    if (!place) return;
+    var ren = function (s) { return s && RE_GENERIC_POS.test(s) && s.indexOf(place) !== 0 ? place + s : s; };
+    if (!ds.stations || !ds.stations.some(function (s) { return RE_GENERIC_POS.test(s || ''); })) return;
+    ds.recs.forEach(function (r) { r.st = ren(r.st); });
+    ds.stations = ds.stations.map(ren);
+    (ds.stds || []).forEach(function (s) { if (s.st && s.st !== '*') s.st = ren(s.st); });
   }
 
   /* ---------- 從標題取得測站 ---------- */
@@ -782,7 +818,8 @@
     if (numeric < 2) return null;
     ds.caption = t.caption || '';
     ds.sheet = t.sheet || '';
-    ds.cat = guessCat([ds.catText, t.caption, (t.ctx || []).join(' '), hint && hint.fileName].join(' ')) || '';
+    ds.cat = guessCatOrdered([t.caption, ds.catText, (t.ctx || []).join(' '), hint && hint.fileName]) || '';
+    prefixGenericStations(ds, t.caption || '');
     ds.likely = /結果|成果|監測值|檢測值|測值|報告/.test(ds.caption + (ds.meta ? ds.meta.title : '')) || ds.engine === 'form';
     return ds;
   }
