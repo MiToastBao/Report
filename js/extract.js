@@ -47,10 +47,23 @@
   }
 
   /* ---------- 數值 ---------- */
-  var RE_BLANK = /^(?:|[-－—–―]+|\*+|＊+|\/|NA|N\/A|n\.a\.|※|…|\.\.\.|－－|無)$/i;
+  var RE_BLANK = /^(?:|[-－—–―‐‑−]+|\*+|＊+|[\/／]|NA|N\/A|N\.A\.?|n\.a\.|※|…|\.\.\.|無|分析中|待補|未檢測)$/i;
+  // 沒有數值的格子分兩類（v1.0.9，使用者裁示）：
+  //   ph＝疑似佔位文字（之後可能補上）：破折號（不論長短粗細算同一種）、/、＊、無、分析中、待補、※、…
+  //   na＝無測值（有時是有效的結果）：NA、N/A、未檢測（ND 另外是 kind 'nd'）
+  function blankClass(s) {
+    if (!s) return null;
+    if (/^[-－—–―‐‑−]+$/.test(s)) return { cls: 'ph', sym: '破折號' };
+    if (/^[\/／]$/.test(s)) return { cls: 'ph', sym: '/' };
+    if (/^[*＊]+$/.test(s)) return { cls: 'ph', sym: '＊' };
+    if (/^(?:NA|N\/A|N\.A\.?|n\.a\.)$/i.test(s)) return { cls: 'na', sym: 'NA' };
+    if (s === '未檢測') return { cls: 'na', sym: '未檢測' };
+    if (s === '...') return { cls: 'ph', sym: '…' };
+    return { cls: 'ph', sym: s };
+  }
   function parseVal(raw) {
     var s = norm(raw).replace(/\s+/g, '');
-    if (RE_BLANK.test(s)) return { kind: 'blank', num: null };
+    if (RE_BLANK.test(s)) { var bc = blankClass(s); return bc ? { kind: 'blank', num: null, cls: bc.cls, sym: bc.sym } : { kind: 'blank', num: null }; }
     s = s.replace(/[*＊#]+$/, '');
     if (/^N\.?D\.?(?:[<(（].*)?$/i.test(s) || s === '未檢出' || s === '未檢測出') return { kind: 'nd', num: null };
     // 「<2.0(1.1)」：低於定量極限 2.0，括號裡是儀器讀值（參考用）——當成 <2.0（v1.0.6）
@@ -814,6 +827,11 @@
       if (ds && !ds.meta.d && !(hint && hint.sheetBook && ds.meta.st)) ds = null;
     }
     if (!ds || !ds.recs.length) return null;
+    // 「備註」「說明」欄不是監測項目，不匯入（v1.0.9）
+    var RE_REMARK = /^(?:備註|附註|備考|說明|註記?|remarks?|note)$/i;
+    ds.recs = ds.recs.filter(function (x) { return !RE_REMARK.test(norm(x.base || x.item || '').replace(/\s+/g, '')); });
+    ds.stds = (ds.stds || []).filter(function (x) { return !RE_REMARK.test(norm(x.item || '').replace(/\s+/g, '')); });
+    if (!ds.recs.length) return null;
     var numeric = ds.recs.filter(function (x) { return !x.text && isValueLike(x.raw); }).length;
     if (numeric < 2) return null;
     ds.caption = t.caption || '';

@@ -151,7 +151,7 @@
         var cats = Object.keys(catsIso).sort(function (a, b) { return catsIso[a] < catsIso[b] ? -1 : catsIso[a] > catsIso[b] ? 1 : a < b ? -1 : 1; });
         var series = o.stations.filter(function (st) { return rs.some(function (r) { return r.st === st; }); }).map(function (st) {
           var vals = cats.map(function () { return null; });
-          pts.forEach(function (p) { if (p.r.st === st) vals[cats.indexOf(p.lab)] = { raw: p.r.raw, num: valOf(p.r.raw).num, kind: valOf(p.r.raw).kind, iso: p.r.iso }; });
+          pts.forEach(function (p) { if (p.r.st === st) vals[cats.indexOf(p.lab)] = { raw: p.r.raw, num: valOf(p.r.raw).num, kind: valOf(p.r.raw).kind, cls: valOf(p.r.raw).cls, iso: p.r.iso }; });
           return { name: st, values: vals };
         });
         // 標準線：各站相同才畫一條；不同時每個值各一條並標明測站
@@ -181,7 +181,7 @@
             if (cnt[lab] > 1) lab += '-' + cnt[lab];
             cats.push(lab);
             var pv = valOf(r.raw);
-            vals.push({ raw: r.raw, num: pv.num, kind: pv.kind, iso: r.iso });
+            vals.push({ raw: r.raw, num: pv.num, kind: pv.kind, cls: pv.cls, iso: r.iso });
           });
           var isos = vals.map(function (v) { return v.iso; });
           var sl = spans(stdLinesOf(st, item), isos);
@@ -265,6 +265,23 @@
         if (r.excl || textItems[r.item]) return;
         var k = valOf(r.raw).kind;
         if (k === 'text') add({ id: 'txt|' + r.k, type: 'text', level: 'err', cat: cat, k: r.k, rec: r, msg: '數值「' + r.raw + '」不是數字、ND 或 <x，無法畫圖' });
+      });
+      // 1b. 沒有數值的格子（v1.0.9，使用者裁示）
+      //   疑似佔位文字（破折號、/、＊、無、分析中、待補…）與 NA、未檢測：逐筆，可依符號篩選
+      //   ND：同一站同一測項合成一則，確認一次後這站這測項之後的 ND 都不再提醒
+      //   標為「之後會補上」的：放到「等待補上」（不算在異常數量裡）
+      var ndG = {};
+      rs.forEach(function (r) {
+        if (r.excl || textItems[r.item]) return;
+        var v = valOf(r.raw);
+        if (r.pending && (v.cls || v.kind === 'nd')) { add({ id: 'pend|' + r.k, type: 'pending', level: 'info', cat: cat, k: r.k, rec: r, sym: v.cls ? v.sym : 'ND', msg: '標為「之後會補上」：目前是「' + r.raw + '」，之後匯入補上數值的報告時會列入「兩份檔案數值不同」' }); return; }
+        if (v.cls === 'ph') add({ id: 'ph|' + r.k + '|' + r.raw, type: 'ph', level: 'warn', cat: cat, k: r.k, rec: r, sym: v.sym, msg: '「' + r.raw + '」看起來是佔位文字（還沒有數值）。確認真的沒有數值，或標為之後會補上' });
+        else if (v.cls === 'na') add({ id: 'na|' + r.k + '|' + r.raw, type: 'na', level: 'warn', cat: cat, k: r.k, rec: r, sym: v.sym, msg: '「' + r.raw + '」無測值，請確認真的無測值，或標為之後會補上' });
+        else if (v.kind === 'nd') { var gk = r.st + '|' + r.item; (ndG[gk] = ndG[gk] || []).push(r); }
+      });
+      Object.keys(ndG).forEach(function (gk) {
+        var g = ndG[gk], ds = uniq(g.map(function (r) { return r.iso; }).sort()).map(rocDate);
+        add({ id: 'ndg|' + cat + '|' + gk, type: 'na', level: 'warn', cat: cat, st: g[0].st, item: g[0].item, recs: g, sym: 'ND', msg: '測站「' + g[0].st + '」的「' + g[0].item + '」有 ' + g.length + ' 筆 ND（' + ds.slice(0, 6).join('、') + (ds.length > 6 ? ' 等 ' + ds.length + ' 天' : '') + '）。確認無誤後，這站這測項之後的 ND 都不再提醒' });
       });
       // 2. 異常高低值（同站同測項 ≥6 筆，超過四分位距 3 倍）
       var bySI = {};
@@ -351,7 +368,7 @@
     });
     // 7. 匯入時數值不同而被覆蓋
     conflicts.forEach(function (c) {
-      add({ id: 'conf|' + c.k + '|' + c.old + '|' + c.raw, type: 'conflict', level: 'warn', cat: c.cat, k: c.k, rec: recs.filter(function (r) { return r.k === c.k; })[0] || null, msg: c.how === 'merge' ? '測站「' + c.from + '」歸入「' + c.to + '」時同一天數值不同：「' + c.from + '」為「' + c.old + '」（' + (c.oldSrc || '') + '），「' + c.to + '」為「' + c.raw + '」（' + (c.src || '') + '），目前用「' + c.to + '」的值' : '兩份檔案數值不同：原本「' + c.old + '」（' + (c.oldSrc || '') + '），已改為「' + c.raw + '」（' + (c.src || '') + '）' });
+      add({ id: 'conf|' + c.k + '|' + c.old + '|' + c.raw, type: 'conflict', level: 'warn', cat: c.cat, k: c.k, rec: recs.filter(function (r) { return r.k === c.k; })[0] || null, msg: (c.oldPending ? '（原本標為「之後會補上」）' : '') + (c.how === 'merge' ? '測站「' + c.from + '」歸入「' + c.to + '」時同一天數值不同：「' + c.from + '」為「' + c.old + '」（' + (c.oldSrc || '') + '），「' + c.to + '」為「' + c.raw + '」（' + (c.src || '') + '），目前用「' + c.to + '」的值' : '兩份檔案數值不同：原本「' + c.old + '」（' + (c.oldSrc || '') + '），已改為「' + c.raw + '」（' + (c.src || '') + '）') });
     });
     return out;
   }

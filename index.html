@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>監測報告趨勢圖產生器</title>
-<link rel="stylesheet" href="css/app.css?v=1.0.8">
+<link rel="stylesheet" href="css/app.css?v=1.0.9">
 </head>
 <body>
 <div class="shell">
@@ -13,7 +13,7 @@
       <div class="mark" aria-hidden="true"><svg viewBox="0 0 32 32" width="26" height="26"><rect x="5" y="16" width="4.5" height="11" rx="1.2" fill="#fff" opacity=".55"/><rect x="11.5" y="10" width="4.5" height="17" rx="1.2" fill="#fff" opacity=".8"/><rect x="18" y="13" width="4.5" height="14" rx="1.2" fill="#fff" opacity=".65"/><rect x="24.5" y="6" width="4.5" height="21" rx="1.2" fill="#fff"/><path d="M3 9.5 H29" stroke="#ff8a8a" stroke-width="1.6" stroke-dasharray="2.6 2"/></svg></div>
       <div>
         <div class="brand-name">監測報告<br>趨勢圖產生器</div>
-        <div class="brand-ver" id="verPill">v1.0.8</div>
+        <div class="brand-ver" id="verPill">v1.0.9</div>
       </div>
     </div>
     <div class="proj-box">
@@ -35,7 +35,7 @@
       <div class="nav-group">不分計畫</div>
       <button class="nav-item" data-sec="moenv"><span class="nav-no">7</span>環境部資料查詢</button>
       <button class="nav-item" data-sec="backup"><span class="nav-no">8</span>備份與還原</button>
-      <a class="nav-item nav-link" href="使用說明.html?v=1.0.8" target="_blank" rel="noopener"><span class="nav-no">?</span>使用說明</a>
+      <a class="nav-item nav-link" href="使用說明.html?v=1.0.9" target="_blank" rel="noopener"><span class="nav-no">?</span>使用說明</a>
     </nav>
     <div class="side-foot">資料只存在這台電腦的瀏覽器，不會上傳。</div>
   </aside>
@@ -125,10 +125,12 @@
         <div class="card-head"><div><div class="eyebrow">CHECK</div><h2>資料異常檢查</h2></div><div class="head-actions"><button class="btn primary" id="cRun">重新檢查</button></div></div>
         <p class="muted">一次列出判讀不出來的數值、異常高低值、兩份檔案數值不一致、缺測項、名稱很像的測站、單位不一致與超過標準值。可以批次勾選後按「確認無誤」（從清單消失）、「不採用」（圖表與報告表格不使用），或直接修改數值。</p>
         <div class="chips" id="cChips"></div>
+        <div class="sub-chips" id="cSubChips" hidden></div>
         <div class="table-actions">
           <label class="chk"><input type="checkbox" id="cAll"> 全選目前清單</label>
           <span class="spacer"></span>
           <button class="btn small" id="cOk">勾選的確認無誤</button>
+          <button class="btn small" id="cPend">勾選的標為之後會補上</button>
           <button class="btn small" id="cExcl">勾選的不採用</button>
           <button class="btn small" id="cReset">重新顯示已確認的項目</button>
         </div>
@@ -199,7 +201,11 @@
               <div class="std-peek"><span id="gStdPeek" class="muted small"></span> <button class="btn small" id="gStdEdit" type="button">設定標準值…</button></div>
               <label class="chk"><input type="checkbox" id="gStdAxis" checked> Y 軸範圍包含標準值（取消時，標準值超出資料範圍就不畫線）</label>
               <label class="chk"><input type="checkbox" id="gZero" checked> Y 軸從 0 開始</label>
-              <label class="chk"><input type="checkbox" id="gND"> 在圖上標出 ND／&lt;x（不畫長條）</label>
+              <div class="mark-row"><span class="small muted">沒有數值的格子不畫長條；勾選的在圖上標出文字：</span>
+                <label class="chk"><input type="checkbox" id="gND"> ND</label>
+                <label class="chk"><input type="checkbox" id="gLT"> &lt;X、&gt;X</label>
+                <label class="chk"><input type="checkbox" id="gNA"> NA、未檢測</label>
+                <label class="chk"><input type="checkbox" id="gPH"> 佔位文字（－、/、＊、無、分析中、待補）</label></div>
               <label class="chk"><input type="checkbox" id="gStTitle" checked> 圖標題加上測站名稱（每站一張時）</label>
             </div>
             <div class="opt-block">
@@ -295,17 +301,17 @@
   </main>
 </div>
 
-<script src="vendor/jszip.min.js?v=1.0.8"></script>
-<script src="vendor/xlsx.full.min.js?v=1.0.8"></script>
-<script src="vendor/exceljs.min.js?v=1.0.8"></script>
-<script src="js/version.js?v=1.0.8"></script>
-<script src="js/docread.js?v=1.0.8"></script>
-<script src="js/extract.js?v=1.0.8"></script>
-<script src="js/core.js?v=1.0.8"></script>
-<script src="js/chart.js?v=1.0.8"></script>
-<script src="js/xlsxout.js?v=1.0.8"></script>
-<script src="js/moenv.js?v=1.0.8"></script>
-<script src="js/store.js?v=1.0.8"></script>
-<script src="js/app.js?v=1.0.8"></script>
+<script src="vendor/jszip.min.js?v=1.0.9"></script>
+<script src="vendor/xlsx.full.min.js?v=1.0.9"></script>
+<script src="vendor/exceljs.min.js?v=1.0.9"></script>
+<script src="js/version.js?v=1.0.9"></script>
+<script src="js/docread.js?v=1.0.9"></script>
+<script src="js/extract.js?v=1.0.9"></script>
+<script src="js/core.js?v=1.0.9"></script>
+<script src="js/chart.js?v=1.0.9"></script>
+<script src="js/xlsxout.js?v=1.0.9"></script>
+<script src="js/moenv.js?v=1.0.9"></script>
+<script src="js/store.js?v=1.0.9"></script>
+<script src="js/app.js?v=1.0.9"></script>
 </body>
 </html>

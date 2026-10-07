@@ -191,13 +191,23 @@
       ctx.fillStyle = multi ? PALETTE[b.si % PALETTE.length] : (o.color || SINGLE);
       ctx.fillRect(b.x + (ns > 1 ? 0.5 : 0), b.y, b.w - (ns > 1 ? 1 : 0), b.h);
     });
-    if (o.markND) {
-      ctx.font = font(11); ctx.fillStyle = '#6b7385'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    // 沒有數值的格子：依種類決定要不要在圖上標出文字（v1.0.9）
+    var mk = o.marks || (o.markND ? { nd: 1, lt: 1 } : {});
+    function markOf(v) {
+      if (!v || v.num != null) return '';
+      if (v.kind === 'nd') return mk.nd ? 'ND' : '';
+      if (v.kind === 'lt' || v.kind === 'gt') return mk.lt ? String(v.raw).replace(/\s+/g, '') : '';
+      if (v.kind === 'blank' && v.cls === 'na') return mk.na ? String(v.raw).replace(/\s+/g, '') : '';
+      if (v.kind === 'blank' && v.cls === 'ph') return mk.ph ? String(v.raw).replace(/\s+/g, '') : '';
+      return '';
+    }
+    if (mk.nd || mk.lt || mk.na || mk.ph) {
+      ctx.font = font(fs.tick + 1, true); ctx.fillStyle = '#3d4555'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
       spec.series.forEach(function (s, si) {
         s.values.forEach(function (v, i) {
-          if (!v || v.num != null || v.kind === 'blank') return;
+          if (!markOf(v)) return;
           var x0 = L.left + L.slot * i + (L.slot - L.groupW) / 2 + L.barW * si;
-          var t = v.kind === 'nd' ? 'ND' : String(v.raw).replace(/\s+/g, '');
+          var t = markOf(v);
           ctx.save(); ctx.translate(x0 + L.barW / 2, L.y(Math.max(sc.min, 0)) - 3);
           if (ctx.measureText(t).width > L.barW + 2) { ctx.rotate(-Math.PI / 2); ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(t, 0, 0); }
           else ctx.fillText(t, 0, 0);

@@ -416,7 +416,7 @@
           }
           var pk1 = phaseKey(r); if (!(pk1 in pidx)) pidx[pk1] = r.raw;
           if (!pTwin[pk1]) pTwin[pk1] = r;
-          if (e) { conflicts.push({ k: r.k, cat: r.cat, old: e.raw, oldSrc: e.src, raw: r.raw, src: r.src, at: Date.now(), bid: bid }); r.excl = e.excl; if (!prev[r.k]) prev[r.k] = e; }
+          if (e) { conflicts.push({ k: r.k, cat: r.cat, old: e.raw, oldSrc: e.src, raw: r.raw, src: r.src, at: Date.now(), bid: bid, oldPending: e.pending ? 1 : 0 }); r.excl = e.excl; if (!prev[r.k]) prev[r.k] = e; }
           r.bid = bid; seen[r.k] = r; put.push(r);
         });
         // 別名、略過的測項
@@ -641,8 +641,9 @@
   });
 
   /* ================= 異常檢查 ================= */
-  var cFilter = '', cShowOk = false, lastAnoms = [];
-  var TYPE_LABEL = { text: '判讀不出的數值', outlier: '異常高低值', conflict: '兩份檔案數值不同', missing: '缺測項', similar: '名稱很像的測站', sameval: '數值完全一樣的測站', unit: '單位不一致', over: '超過標準值（提示）' };
+  var cFilter = '', cSym = '', cShowOk = false, lastAnoms = [];
+  function shownAnoms() { return lastAnoms.filter(function (x) { return (!cFilter || x.type === cFilter) && (!cSym || x.sym === cSym); }); }
+  var TYPE_LABEL = { text: '判讀不出的數值', outlier: '異常高低值', conflict: '兩份檔案數值不同', missing: '缺測項', similar: '名稱很像的測站', sameval: '數值完全一樣的測站', ph: '疑似佔位文字', na: '無測值', pending: '等待補上', unit: '單位不一致', over: '超過標準值（提示）' };
   function runCheck() { lastAnoms = Co.anomalies(st.recs, st.stds, { ok: cShowOk ? {} : st.meta.ok, conflicts: st.meta.conflicts }); updateBadge(); return lastAnoms; }
   function updateBadge() {
     var n = st.pid ? Co.anomalies(st.recs, st.stds, { ok: st.meta.ok, conflicts: st.meta.conflicts }).filter(function (a) { return a.level !== 'info'; }).length : 0;
@@ -653,28 +654,55 @@
     var an = runCheck();
     var cnt = {}; an.forEach(function (a) { cnt[a.type] = (cnt[a.type] || 0) + 1; });
     $('cChips').innerHTML = '<span class="chip' + (!cFilter ? ' on' : '') + '" data-t="">全部<b>' + an.length + '</b></span>' + Object.keys(TYPE_LABEL).filter(function (t) { return cnt[t]; }).map(function (t) { return '<span class="chip' + (cFilter === t ? ' on' : '') + '" data-t="' + t + '">' + TYPE_LABEL[t] + '<b>' + cnt[t] + '</b></span>'; }).join('');
-    var list = an.filter(function (a) { return !cFilter || a.type === cFilter; });
+    // 疑似佔位文字、無測值、等待補上：可再依符號篩選（例：只看「/」）（v1.0.9）
+    var syms = {}; if (cFilter === 'ph' || cFilter === 'na' || cFilter === 'pending') an.forEach(function (a) { if (a.type === cFilter && a.sym) syms[a.sym] = (syms[a.sym] || 0) + 1; });
+    if (cSym && !syms[cSym]) cSym = '';
+    var sk = Object.keys(syms);
+    $('cSubChips').hidden = !sk.length;
+    $('cSubChips').innerHTML = sk.length ? '<span class="chip' + (!cSym ? ' on' : '') + '" data-sym="">全部符號<b>' + sk.reduce(function (t, k) { return t + syms[k]; }, 0) + '</b></span>' + sk.map(function (k) { return '<span class="chip' + (cSym === k ? ' on' : '') + '" data-sym="' + esc(k) + '">' + esc(k === '破折號' ? '破折號（－ - —）' : k) + '<b>' + syms[k] + '</b></span>'; }).join('') : '';
+    var list = shownAnoms();
     if (!st.recs.length) { $('cList').innerHTML = '<div class="empty">還沒有資料</div>'; return; }
     if (!list.length) { $('cList').innerHTML = '<div class="ok-box">✔ 目前沒有需要確認的項目。</div>'; return; }
     $('cList').innerHTML = list.slice(0, 600).map(function (a, i) {
-      var where = a.rec ? a.cat + '｜' + a.rec.st + '｜' + a.rec.dl + (a.rec.note ? '（' + a.rec.note + '）' : '') + '｜' + a.rec.item : a.type === 'missing' ? a.cat + '｜' + a.st + '｜' + a.dl : a.cat;
+      var where = a.type === 'na' && !a.rec ? a.cat + '｜' + a.st + '｜' + a.item : a.rec ? a.cat + '｜' + a.rec.st + '｜' + a.rec.dl + (a.rec.note ? '（' + a.rec.note + '）' : '') + '｜' + a.rec.item : a.type === 'missing' ? a.cat + '｜' + a.st + '｜' + a.dl : a.cat;
       var act = '';
       if (a.rec) act = '<input class="cell" data-edit="' + esc(a.rec.k) + '" value="' + esc(a.rec.raw) + '" title="直接修改數值">' + (a.rec.excl ? '<span class="pill same">已不採用</span>' : '');
+      if (a.type === 'ph' || (a.type === 'na' && a.rec)) act += '<button class="btn small" data-okone="' + i + '">確認真的無測值</button><button class="btn small" data-pend="' + i + '">之後會補上</button>';
+      if (a.type === 'na' && !a.rec) act = '<button class="btn small" data-okone="' + i + '">確認 ND 無誤</button>';
+      if (a.type === 'pending') act += '<span class="pill pend">等待補上</span><button class="btn small" data-unpend="' + i + '">取消等待</button>';
       if (a.type === 'sameval') act = '<button class="btn small" data-merge="' + i + '" data-to="0">同一站，歸入「' + esc(a.names[0]) + '」</button><button class="btn small" data-merge="' + i + '" data-to="1">同一站，歸入「' + esc(a.names[1]) + '」</button><button class="btn small" data-look="' + i + '">到資料檢視核對</button><button class="btn small" data-notsame="' + i + '">不是同一站，數值無誤</button>';
       if (a.type === 'similar') act = '<button class="btn small" data-merge="' + i + '" data-to="0">歸入「' + esc(a.names[0]) + '」</button><button class="btn small" data-merge="' + i + '" data-to="1">歸入「' + esc(a.names[1]) + '」</button><button class="btn small" data-notsame="' + i + '">不是同一站</button>';
       return '<div class="anom ' + a.level + '"><input type="checkbox" data-id="' + esc(a.id) + '" data-rk="' + esc(a.rec ? a.rec.k : '') + '"><div class="a-main"><div class="a-where">' + esc(TYPE_LABEL[a.type]) + '・' + esc(where) + (a.rec && a.rec.src ? '・' + esc(a.rec.src) : '') + '</div><div class="a-msg">' + esc(a.msg) + '</div></div><div class="a-act">' + act + '</div></div>';
     }).join('') + (list.length > 600 ? '<div class="muted small">只顯示前 600 項</div>' : '');
     $('cAll').checked = false;
   }
-  $('cChips').addEventListener('click', function (e) { var c = e.target.closest('.chip'); if (!c) return; cFilter = c.getAttribute('data-t'); renderCheck(); });
+  $('cChips').addEventListener('click', function (e) { var c = e.target.closest('.chip'); if (!c) return; cFilter = c.getAttribute('data-t'); cSym = ''; renderCheck(); });
+  $('cSubChips').addEventListener('click', function (e) { var c = e.target.closest('.chip'); if (!c) return; cSym = c.getAttribute('data-sym'); renderCheck(); });
+  function setPending(recs, on) {
+    var ch = recs.filter(Boolean).map(function (r) { var o = Object.assign({}, r); if (on) o.pending = Date.now(); else delete o.pending; return o; });
+    return S.putRecs(ch).then(function () { return loadProject(st.pid); }).then(function () { renderCheck(); toast(on ? '已標為之後會補上 ' + ch.length + ' 筆（移到「等待補上」）' : '已取消等待補上'); });
+  }
+  $('cPend').addEventListener('click', function () {
+    var ks = Array.prototype.map.call($('cList').querySelectorAll('input[data-id]:checked'), function (c) { return c.getAttribute('data-rk'); }).filter(Boolean);
+    var recs = st.recs.filter(function (r) { return ks.indexOf(r.k) >= 0 && (X.parseVal(r.raw).cls || X.parseVal(r.raw).kind === 'nd'); });
+    if (!recs.length) return toast('請勾選「疑似佔位文字」或「無測值」的項目', true);
+    setPending(recs, true);
+  });
   $('cRun').addEventListener('click', function () { renderCheck(); toast('檢查完成'); });
   $('cAll').addEventListener('change', function () { var v = this.checked; Array.prototype.forEach.call($('cList').querySelectorAll('input[data-id]'), function (c) { c.checked = v; }); });
   $('cList').addEventListener('change', function (e) { var k = e.target.getAttribute('data-edit'); if (k) editValue(k, e.target.value).then(function () { e.target.classList.add('changed'); }); });
   $('cList').addEventListener('keydown', function (e) { if (e.key === 'Enter' && e.target.classList.contains('cell')) e.target.blur(); });
   $('cList').addEventListener('click', function (e) {
+    var b1 = e.target.closest('[data-okone],[data-pend],[data-unpend]');
+    if (b1) {
+      var a1 = shownAnoms()[+(b1.getAttribute('data-okone') || b1.getAttribute('data-pend') || b1.getAttribute('data-unpend'))]; if (!a1) return;
+      if (b1.hasAttribute('data-okone')) { st.meta.ok[a1.id] = Date.now(); saveMeta().then(function () { renderCheck(); toast('已確認'); }); }
+      else setPending([a1.rec], b1.hasAttribute('data-pend'));
+      return;
+    }
     var lk = e.target.closest('[data-look]');
     if (lk) {   // 列出兩站在那一天的資料（v1.0.8）
-      var la = lastAnoms.filter(function (x) { return !cFilter || x.type === cFilter; })[+lk.getAttribute('data-look')]; if (!la) return;
+      var la = shownAnoms()[+lk.getAttribute('data-look')]; if (!la) return;
       go('data'); $('dCat').value = la.cat; renderData();
       $('dSt').value = ''; $('dItem').value = ''; $('dSrc').value = ''; $('dPeriod').value = ''; $('dQ').value = la.days[0] || '';
       renderData(); toast('列出 ' + (la.days[0] || '') + ' 這一天的資料' + (la.days.length > 1 ? '（共 ' + la.days.length + ' 天，可在搜尋欄改日期）' : '') + '，請對照報告核對兩站數值');
@@ -682,14 +710,14 @@
     }
     var ns = e.target.closest('[data-notsame]');
     if (ns) {
-      var sa = lastAnoms.filter(function (x) { return !cFilter || x.type === cFilter; })[+ns.getAttribute('data-notsame')]; if (!sa) return;
+      var sa = shownAnoms()[+ns.getAttribute('data-notsame')]; if (!sa) return;
       st.meta.ok[sa.id] = Date.now();
       saveMeta().then(function () { renderCheck(); toast('已記住「' + sa.names[0] + '」與「' + sa.names[1] + '」不是同一站，不再提醒'); });
       return;
     }
     var b = e.target.closest('[data-merge]'); if (!b) return;
 
-    var shown = lastAnoms.filter(function (x) { return !cFilter || x.type === cFilter; });
+    var shown = shownAnoms();
     var an = shown[+b.getAttribute('data-merge')]; if (!an) return;
     var to = an.names[+b.getAttribute('data-to')], from = an.names[1 - +b.getAttribute('data-to')];
     if (!confirm('把「' + from + '」的資料全部歸入測站「' + to + '」？之後匯入「' + from + '」也會自動歸入。\n（可以在「測項與標準值」頁的「測站名稱與歸類」取消歸入）')) return;
@@ -1072,7 +1100,8 @@
     if (formInitPid !== st.pid) {
       formInitPid = st.pid;
       if (f.mode) setRadio('gMode', f.mode); if (f.x) setRadio('gX', f.x); if (f.split) setRadio('gSplit', f.split);
-      ['gStd', 'gZero', 'gND', 'gStTitle', 'gStdAxis'].forEach(function (id) { if (f[id] != null) $(id).checked = f[id]; });
+      ['gStd', 'gZero', 'gND', 'gLT', 'gNA', 'gPH', 'gStTitle', 'gStdAxis'].forEach(function (id) { if (f[id] != null) $(id).checked = f[id]; });
+      if (f.gLT == null && f.gND != null) $('gLT').checked = f.gND;   // v1.0.8 以前「ND／<x」是同一個勾選
     }
     var qs = {}; recsCat.forEach(function (r) { qs[Co.quarterOf(r.iso)] = 1; });
     var yy = {}; recsCat.forEach(function (r) { yy[Co.rocY(r.iso)] = 1; });
@@ -1120,10 +1149,10 @@
   function checkedVals(id) { return Array.prototype.map.call($(id).querySelectorAll('input:checked'), function (c) { return c.value; }); }
   function saveForm() {
     if (!st.pid) return;
-    st.meta.chartForm = { cat: $('gCat').value, fromY: +$('gFromY').value, fromM: +$('gFromM').value, toY: +$('gToY').value, toM: +$('gToM').value, mode: radio('gMode'), x: radio('gX'), split: radio('gSplit'), sts: checkedVals('gSts'), items: checkedVals('gItems'), gStd: $('gStd').checked, gZero: $('gZero').checked, gND: $('gND').checked, gStTitle: $('gStTitle').checked, gStdAxis: $('gStdAxis').checked };
+    st.meta.chartForm = { cat: $('gCat').value, fromY: +$('gFromY').value, fromM: +$('gFromM').value, toY: +$('gToY').value, toM: +$('gToM').value, mode: radio('gMode'), x: radio('gX'), split: radio('gSplit'), sts: checkedVals('gSts'), items: checkedVals('gItems'), gStd: $('gStd').checked, gZero: $('gZero').checked, gND: $('gND').checked, gLT: $('gLT').checked, gNA: $('gNA').checked, gPH: $('gPH').checked, gStTitle: $('gStTitle').checked, gStdAxis: $('gStdAxis').checked };
     saveMeta();
   }
-  function drawOpts(scale) { return { scale: scale, std: $('gStd').checked, stdAxis: $('gStdAxis').checked, zero: $('gZero').checked, markND: $('gND').checked, stationInTitle: $('gStTitle').checked }; }
+  function drawOpts(scale) { return { scale: scale, std: $('gStd').checked, stdAxis: $('gStdAxis').checked, zero: $('gZero').checked, marks: { nd: $('gND').checked, lt: $('gLT').checked, na: $('gNA').checked, ph: $('gPH').checked }, stationInTitle: $('gStTitle').checked }; }
   $('gGo').addEventListener('click', function () {
     if (!needProject()) return;
     saveForm();

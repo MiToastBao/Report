@@ -387,3 +387,29 @@ test('#17 兩站在相同日期的數值全部一樣：列入「數值完全一�
   const few = [mk('甲', '2026-01-01', 'pH', '7.0'), mk('乙', '2026-01-01', 'pH', '7.0'), mk('甲', '2026-01-01', 'SS', 'ND'), mk('乙', '2026-01-01', 'SS', 'ND')];
   assert.equal(Co.anomalies(few, [], {}).filter(a => a.type === 'sameval').length, 0);
 });
+
+test('#18 沒有數值的格子：佔位文字與無測值分類、ND 同站同測項合成一則、等待補上不算異常', () => {
+  ['－', '-', '—', '－－', '–'].forEach(s => assert.equal(X.parseVal(s).sym, '破折號', s));
+  assert.equal(X.parseVal('/').cls, 'ph'); assert.equal(X.parseVal('＊').sym, '＊'); assert.equal(X.parseVal('無').cls, 'ph');
+  assert.equal(X.parseVal('分析中').cls, 'ph'); assert.equal(X.parseVal('待補').cls, 'ph');
+  assert.equal(X.parseVal('NA').cls, 'na'); assert.equal(X.parseVal('N/A').sym, 'NA'); assert.equal(X.parseVal('未檢測').sym, '未檢測');
+  assert.equal(X.parseVal('ND').kind, 'nd'); assert.equal(X.parseVal('').cls, undefined);
+  const mk = (st, iso, item, v, extra) => Object.assign({ pid: 'p', cat: '河川水', st, iso, dl: iso, note: '', item, unit: '', raw: v, src: 'x', k: [st, iso, item].join('|') }, extra || {});
+  const recs = [mk('甲', '2026-07-01', 'SS', '分析中'), mk('甲', '2026-07-01', 'pH', 'NA'), mk('甲', '2026-07-01', '氨氮', 'ND'), mk('甲', '2026-08-01', '氨氮', 'ND'), mk('甲', '2026-08-01', 'SS', '/', { pending: 1 }), mk('甲', '2026-08-01', 'pH', '7.1')];
+  const an = Co.anomalies(recs, [], {});
+  assert.deepEqual(an.filter(a => a.type === 'ph').map(a => a.sym), ['分析中']);
+  assert.deepEqual(an.filter(a => a.type === 'na').map(a => a.sym).sort(), ['NA', 'ND']);
+  assert.equal(an.find(a => a.sym === 'ND').recs.length, 2);
+  const p = an.filter(a => a.type === 'pending'); assert.equal(p.length, 1); assert.equal(p[0].level, 'info');
+  const ok = {}; ok[an.find(a => a.sym === 'ND').id] = 1;
+  const an2 = Co.anomalies(recs.concat([mk('甲', '2026-09-01', '氨氮', 'ND')]), [], { ok });
+  assert.ok(!an2.some(a => a.sym === 'ND'), '確認一次後這站這測項之後的 ND 不再提醒');
+});
+
+test('#19 「備註」欄不是監測項目，不匯入', () => {
+  const t = tbl([['位置', '時間', 'pH', '懸浮固體', '備註'], ['上游', '115.07.10', '7.8', '12', '－'], ['下游', '115.07.10', '7.7', '15', '雨天'], ['上游', '115.08.10', '7.6', '10', '－']], '表2-5 大安溪河川水監測結果');
+  const ds = X.extractTable(t, {});
+  assert.ok(ds);
+  assert.ok(!ds.recs.some(r => r.item === '備註'), ds.recs.map(r => r.item).join(','));
+  assert.equal(ds.recs.length, 6);
+});
