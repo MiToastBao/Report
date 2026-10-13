@@ -186,7 +186,9 @@
     function stdLinesOf(st, item) {
       var out = [];
       stdCands(stds, cat, st, item).forEach(function (s) {
-        s.lines.forEach(function (v) { out.push({ v: v, label: s.label || '標準值', text: s.text, from: s.from || '', to: s.to || '', m1: s.m1 || 0, m2: s.m2 || 0, period: s.from || s.to ? periodNote0(s) : '', refs: [{ st: st, s: s, item: item }] }); }); // 圖上文字不寫適用月份（線的位置就代表月份）
+        // v1.0.14：上限（不可超過）紅色、下限（要超過才合格）藍色；範圍（例 pH 6～9）下面那條是下限、上面那條是上限
+        var md = s.mode || (s.lines.length >= 2 && /[~～至]/.test(s.text || '') ? 'range' : 'max'), lo = Math.min.apply(null, s.lines);
+        s.lines.forEach(function (v) { out.push({ v: v, bound: md === 'min' || (md === 'range' && v === lo && s.lines.length > 1) ? 'lo' : 'hi', label: s.label || '標準值', text: s.text, from: s.from || '', to: s.to || '', m1: s.m1 || 0, m2: s.m2 || 0, period: s.from || s.to ? periodNote0(s) : '', refs: [{ st: st, s: s, item: item }] }); }); // 圖上文字不寫適用月份（線的位置就代表月份）
       });
       return out;
     }
@@ -234,7 +236,7 @@
         var lines = [], seen = {};
         series.forEach(function (s) {
           stdLinesOf(s.name, item).forEach(function (ln) {
-            var key = ln.v + '|' + ln.from + '|' + ln.to + '|' + ln.m1 + '-' + ln.m2;
+            var key = ln.v + '|' + ln.from + '|' + ln.to + '|' + ln.m1 + '-' + ln.m2 + '|' + ln.bound;
             if (!seen[key]) { seen[key] = Object.assign({}, ln, { sts: [] }); lines.push(seen[key]); }
             seen[key].sts.push(s.name);
             if (seen[key] !== ln && ln.refs) seen[key].refs = (seen[key].refs || []).concat(ln.refs);

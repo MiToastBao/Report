@@ -8,7 +8,8 @@
   'use strict';
   var FONT = '"Microsoft JhengHei","微軟正黑體","PingFang TC","Noto Sans CJK TC","Noto Sans TC",sans-serif';
   var PALETTE = ['#4472C4', '#ED7D31', '#A5A5A5', '#FFC000', '#5B9BD5', '#70AD47', '#264478', '#9E480E', '#636363', '#997300', '#255E91', '#43682B', '#7F6000', '#8E44AD', '#16A085', '#C0392B'];
-  var SINGLE = '#5B9BD5', STD = '#E03131';
+  var SINGLE = '#5B9BD5', STD = '#E03131', STD_LO = '#1238A6';
+  function stdColor(ln) { return ln && ln.bound === 'lo' ? STD_LO : STD; }
 
   function niceScale(min, max, want) {
     want = want || 6;
@@ -203,7 +204,7 @@
               return yy >= r.y - 1 && yy <= r.y + r.h + 1 && r.x < ox1 && r.x + r.w > ox0;
             }) ||
             L.labels.some(function (q) { return r.x < q.x + q.w && r.x + r.w > q.x && r.y < q.y + q.h && r.y + r.h > q.y; });
-          if (!hit) ok = { x: r.x, y: r.y, w: r.w, h: r.h, tx: cands[c].x, ty: cands[c].y, txt: txt };
+          if (!hit) ok = { x: r.x, y: r.y, w: r.w, h: r.h, tx: cands[c].x, ty: cands[c].y, txt: txt, color: stdColor(ln) };
         }
         if (ok) L.labels.push(ok); else newBand.push(ln);
       });
@@ -289,17 +290,20 @@
     stdList.forEach(function (ln) {
       var y = Math.round(L.y(ln.v)) + 0.5;
       var x0 = L.left + L.slot * (ln.i0 != null ? ln.i0 : 0), x1 = L.left + L.slot * (ln.i1 != null ? ln.i1 + 1 : n);
-      ctx.save(); ctx.strokeStyle = STD; ctx.lineWidth = 2; ctx.setLineDash([8, 5]);
+      // 先畫白色描邊，虛線經過同色長條（例：藍色長條上的藍色下限線）也看得見（v1.0.14）
+      ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke(); ctx.restore();
+      ctx.save(); ctx.strokeStyle = stdColor(ln); ctx.lineWidth = 2; ctx.setLineDash([8, 5]);
       ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke(); ctx.restore();
     });
     ctx.font = font(fs.std, true); ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillStyle = STD;
-    L.labels.forEach(function (lb) { ctx.fillText(lb.txt, lb.tx, lb.ty); });
+    L.labels.forEach(function (lb) { ctx.fillStyle = lb.color || STD; ctx.fillText(lb.txt, lb.tx, lb.ty); });
     // 放不進圖內的標準值 → 圖上方說明列
     band.forEach(function (ln, i) {
       var y = L.bandTop + i * (fs.std + 8) + fs.std / 2 + 2;
       var txt = stdText(ln, spec.unit), tw = ctx.measureText(txt).width;
       var x = L.left + Math.max(0, (L.plotW - tw - 40) / 2);
-      ctx.save(); ctx.strokeStyle = STD; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+      ctx.fillStyle = stdColor(ln);
+      ctx.save(); ctx.strokeStyle = stdColor(ln); ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
       ctx.beginPath(); ctx.moveTo(x, y + 0.5); ctx.lineTo(x + 30, y + 0.5); ctx.stroke(); ctx.restore();
       ctx.textBaseline = 'middle'; ctx.fillText(txt, x + 38, y);
     });
@@ -307,7 +311,7 @@
     outStd.forEach(function (ln, k) {
       var y = L.bandTop + (band.length + k) * (fs.std + 8) + fs.std / 2 + 2;
       var txt = '※ ' + stdText(ln, spec.unit) + ' 超出 Y 軸範圍，未畫線', tw = ctx.measureText(txt).width;
-      ctx.textBaseline = 'middle'; ctx.textAlign = 'left'; ctx.fillStyle = STD;
+      ctx.textBaseline = 'middle'; ctx.textAlign = 'left'; ctx.fillStyle = stdColor(ln);
       ctx.fillText(txt, L.left + Math.max(0, (L.plotW - tw) / 2), y);
     });
     // 外框
@@ -367,9 +371,10 @@
     }).join('');
     var k0 = spec.series.length;
     var lines = (x.stdSeries || []).map(function (s, j) {
+      var col = s.color || 'E03131';   // v1.0.14：上限紅、下限藍
       return '<c:ser><c:idx val="' + (k0 + j) + '"/><c:order val="' + (k0 + j) + '"/><c:tx>' + strRef(s.nameRef, [s.name]) + '</c:tx>' +
-        '<c:spPr><a:ln w="22225" cap="rnd"><a:solidFill><a:srgbClr val="E03131"/></a:solidFill><a:prstDash val="dash"/></a:ln></c:spPr>' +
-        '<c:marker><c:symbol val="dash"/><c:size val="7"/><c:spPr><a:solidFill><a:srgbClr val="E03131"/></a:solidFill><a:ln><a:solidFill><a:srgbClr val="E03131"/></a:solidFill></a:ln></c:spPr></c:marker>' +
+        '<c:spPr><a:ln w="22225" cap="rnd"><a:solidFill><a:srgbClr val="' + col + '"/></a:solidFill><a:prstDash val="dash"/></a:ln></c:spPr>' +
+        '<c:marker><c:symbol val="dash"/><c:size val="7"/><c:spPr><a:solidFill><a:srgbClr val="' + col + '"/></a:solidFill><a:ln><a:solidFill><a:srgbClr val="' + col + '"/></a:solidFill></a:ln></c:spPr></c:marker>' +
         '<c:cat>' + strRef(x.catRef, spec.cats) + '</c:cat><c:val>' + numRef(s.valRef, s.vals) + '</c:val><c:smooth val="0"/></c:ser>';
     }).join('');
     var axFont = txPr(1000, 0);
@@ -382,7 +387,7 @@
     var nShown = (x.stdSeries || []).filter(function (s) { return !s.spare; }).length;
     noLegend = !multi && !nShown;
     // 預留（空白）的標準值數列不放進圖例
-    var legend = noLegend ? '' : '<c:legend><c:legendPos val="' + (multi ? 'b' : 't') + '"/>' + (multi ? '' : '<c:legendEntry><c:idx val="0"/><c:delete val="1"/></c:legendEntry>') + (x.stdSeries || []).map(function (s, j) { return '<c:legendEntry><c:idx val="' + (k0 + j) + '"/>' + (s.spare ? '<c:delete val="1"/>' : txPr(1050, 1, 'E03131')) + '</c:legendEntry>'; }).join('') + '<c:overlay val="0"/>' + txPr(1000, 0) + '</c:legend>';
+    var legend = noLegend ? '' : '<c:legend><c:legendPos val="' + (multi ? 'b' : 't') + '"/>' + (multi ? '' : '<c:legendEntry><c:idx val="0"/><c:delete val="1"/></c:legendEntry>') + (x.stdSeries || []).map(function (s, j) { return '<c:legendEntry><c:idx val="' + (k0 + j) + '"/>' + (s.spare ? '<c:delete val="1"/>' : txPr(1050, 1, s.color || 'E03131')) + '</c:legendEntry>'; }).join('') + '<c:overlay val="0"/>' + txPr(1000, 0) + '</c:legend>';
     return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
       '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
       '<c:lang val="zh-TW"/><c:roundedCorners val="0"/><c:chart>' + richTitle(spec.kind === 'station' && x.stationInTitle ? spec.station + '　' + spec.title : spec.title, 1400, 1) + '<c:autoTitleDeleted val="0"/><c:plotArea><c:layout/>' +
@@ -445,5 +450,5 @@
     });
   }
 
-  return { draw: draw, barChartXml: barChartXml, inject: inject, niceScale: niceScale, range: range, PALETTE: PALETTE, stdText: stdText, yTitleOf: yTitleOf };
+  return { draw: draw, barChartXml: barChartXml, inject: inject, niceScale: niceScale, range: range, PALETTE: PALETTE, stdText: stdText, yTitleOf: yTitleOf, stdColor: stdColor };
 });

@@ -152,7 +152,7 @@
             dsc.value = ln.label && ln.label !== '標準值' ? ln.label : '';
           }
           a.numFmt = 'yyyy/mm/dd'; b.numFmt = 'yyyy/mm/dd';
-          styleCell(a); styleCell(b); styleCell(cv, { color: 'FFE03131', bold: true }); styleCell(m1c); styleCell(m2c); styleCell(dsc, { left: true });
+          styleCell(a); styleCell(b); styleCell(cv, { color: ln && ln.bound === 'lo' ? 'FF1238A6' : 'FFE03131', bold: true }); styleCell(m1c); styleCell(m2c); styleCell(dsc, { left: true });
           // 隱藏的繪圖用儲存格：名稱與每個採樣日期的標準值（不在期間內＝#N/A，不畫線）
           var unitTxt = spec.unit ? ' ' + spec.unit.replace(/"/g, '""') : '';
           var txt = ln ? C.stdText(ln, spec.unit) : '';
@@ -172,12 +172,12 @@
             h.value = { formula: 'IF(AND($C$' + row + '<>"",' + dref + '<>"",OR($A$' + row + '="",' + dref + '>=$A$' + row + '),OR($B$' + row + '="",' + dref + '<=$B$' + row + '),' + mOk + '),$C$' + row + ',NA())', result: inr ? ln.v : { error: '#N/A' } };
             vals.push(inr ? ln.v : null);
           }
-          stdSeries.push({ name: txt, spare: !ln, vals: vals, nameRef: qs(name) + '!$' + colName(helperCol - 1) + '$' + row, valRef: qs(name) + '!$' + colName(helperCol) + '$' + row + ':$' + colName(helperCol - 1 + n) + '$' + row });
+          stdSeries.push({ name: txt, spare: !ln, color: ln && ln.bound === 'lo' ? '1238A6' : 'E03131', vals: vals, nameRef: qs(name) + '!$' + colName(helperCol - 1) + '$' + row, valRef: qs(name) + '!$' + colName(helperCol) + '$' + row + ':$' + colName(helperCol - 1 + n) + '$' + row });
         });
         for (var hcI = 0; hcI <= n; hcI++) ws.getColumn(helperCol + hcI).hidden = true;
         endRow = sr + slots.length + 1;
         var note = ws.getCell(endRow, 1);
-        note.value = '↑ 標準值可修改數值、適用期間與適用月份（季節性標準，例如水溫 5～9 月 38、10～翌年 4 月 35）；有新的標準值（例如每年加嚴）就填在空白列，圖上會自動多一條只畫在該期間的紅色虛線。';
+        note.value = '↑ 標準值可修改數值、適用期間與適用月份（季節性標準，例如水溫 5～9 月 38、10～翌年 4 月 35）；有新的標準值（例如每年加嚴）就填在空白列，圖上會自動多一條只畫在該期間的虛線（新增的列一律紅色）。上限（不可超過）為紅色虛線、下限（要超過才合格）為藍色虛線。';
         note.font = Object.assign({}, FONT, { size: 9, color: { argb: 'FF5B6477' } });
         ws.mergeCells(endRow, 1, endRow, 6); note.alignment = { wrapText: true, vertical: 'top' }; ws.getRow(endRow).height = 30; // 不要延伸到圖的下面
         endRow++;
@@ -210,7 +210,8 @@
       ['圖_…', '每張趨勢圖的資料與 Excel 原生長條圖。數值、標準值都可以直接修改，圖會跟著更新。'],
       [''],
       ['ND、<x 等數值', '依報告原樣列出，圖上不畫長條。'],
-      ['紅色虛線', '標準值。修改「標準值」那一格的數字，虛線與標籤會跟著變。']
+      ['紅色虛線', '上限標準值（不可超過才合格）。修改「標準值」那一格的數字，虛線與標籤會跟著變。'],
+      ['藍色虛線', '下限標準值（要超過才合格，例如溶氧量）；範圍（例如 pH 6～9）下面那條是藍色、上面那條是紅色。']
     ].concat((o.notes || []).map(function (t) { return ['備註', t]; })).forEach(function (row) { ex.addRow(row); });
     ex.getColumn(1).width = 16; ex.getColumn(2).width = 100;
     ex.getCell(1, 1).font = Object.assign({}, FONT, { bold: true, size: 14 });

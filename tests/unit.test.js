@@ -497,3 +497,16 @@ test('#34/#35 自己設定的優先於報告帶入；自己設定的兩筆期間
   const an = Co.anomalies([], [auto, user, user2], {});
   assert.equal(an.filter(a => a.type === 'stdover').length, 1);
 });
+
+test('#37 標準線依判定方式上色：上限紅、下限藍、範圍下藍上紅；Excel 一致', () => {
+  const recs = ['2025-01-15', '2025-02-15'].map((d, i) => ({ k: 'r' + i, cat: '河', st: '甲', item: 'x', iso: d, dl: d, raw: '5', unit: '' }));
+  const mk = (text, lines, mode) => [{ cat: '河', st: '甲', item: 'x', lines, text, mode, by: 'auto', k: 'k' + text }];
+  const b = (stds) => Co.buildCharts(recs, stds, { cat: '河', stations: ['甲'], items: ['x'], mode: 'station', xmode: 'date' })[0].stdLines.map(l => l.v + ':' + l.bound);
+  assert.deepEqual(b(mk('30', [30], 'max')), ['30:hi']);
+  assert.deepEqual(b(mk('≧2', [2], 'min')), ['2:lo']);
+  assert.deepEqual(b(mk('6~9', [6, 9], 'range')), ['6:lo', '9:hi']);
+  assert.equal(CH.stdColor({ bound: 'lo' }), '#1238A6'); assert.equal(CH.stdColor({ bound: 'hi' }), '#E03131');
+  const spec = { kind: 'station', title: 'x', item: 'x', unit: '', cats: ['a'], series: [{ name: '甲', values: [{ num: 5 }] }], stdLines: [] };
+  const xml = CH.barChartXml({ spec, catRef: "'s'!$A$2:$A$2", series: [{ nameRef: "'s'!$B$1", valRef: "'s'!$B$2:$B$2" }], stdSeries: [{ name: '標準值 6', color: '1238A6', vals: [6], nameRef: "'s'!$Z$4", valRef: "'s'!$AA$4:$AA$4" }, { name: '標準值 9', vals: [9], nameRef: "'s'!$Z$5", valRef: "'s'!$AA$5:$AA$5" }] });
+  assert.ok(/srgbClr val="1238A6"/.test(xml) && /srgbClr val="E03131"/.test(xml));
+});
