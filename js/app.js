@@ -52,9 +52,9 @@
   function loadProject(pid) {
     st.pid = pid;
     try { localStorage.setItem('rtg.pid', pid || ''); } catch (e) { /* 私密模式 */ }
-    if (!pid) { st.recs = []; st.stds = []; st.meta = {}; renderHeader(); renderLog(); return Promise.resolve(); }
-    return Promise.all([S.recs(pid), S.stds(pid), S.getMeta(pid, 'm', {})]).then(function (a) {
-      st.recs = a[0]; st.stds = a[1]; st.meta = a[2] || {};
+    if (!pid) { st.recs = []; st.stds = []; st.meta = {}; st.stdObs = []; renderHeader(); renderLog(); return Promise.resolve(); }
+    return Promise.all([S.recs(pid), S.stds(pid), S.getMeta(pid, 'm', {}), S.getMeta(pid, 'stdobs', [])]).then(function (a) {
+      st.recs = a[0]; st.stds = a[1]; st.meta = a[2] || {}; st.stdObs = a[3] || [];
       return migrateStds().then(function () {
       ['stAlias', 'itemAlias', 'itemIgnore', 'itemPicked', 'ok', 'units', 'chartForm'].forEach(function (k) { if (!st.meta[k]) st.meta[k] = {}; });
       if (!st.meta.conflicts) st.meta.conflicts = [];
@@ -91,6 +91,24 @@
     return S.putStds(put, del).then(function () { return S.stds(st.pid); }).then(function (a) { st.stds = a; });
   }
   function saveMeta() { return S.setMeta(st.pid, 'm', st.meta); }
+  /* 報告帶入的標準值依報告期間分段（v1.0.13）：st.stdObs 是每份報告帶入的標準值與採樣期間；
+     groups：要重算的「類別\u0001測站\u0001測項」（測項可為 '*' ＝該測站全部測項）。
+     有 obs 的組：刪掉該組所有報告帶入的標準值，換成分段結果（自己設定的不動；鍵值相同的不覆蓋）；沒有 obs 的組不動 */
+  function gKey(cat, stn, item) { return cat + '\u0001' + stn + '\u0001' + item; }
+  function inGroups(groups, x) { return groups[gKey(x.cat, x.st, x.item)] || groups[gKey(x.cat, x.st, '*')]; }
+  function rebuildStds(groups, extraPut) {
+    var obs = (st.stdObs || []).filter(function (o) { return inGroups(groups, o); });
+    var has = {}; obs.forEach(function (o) { has[gKey(o.cat, o.st, o.item)] = 1; });
+    var der = Co.deriveStds(obs).stds;
+    var user = {}; st.stds.forEach(function (x) { if (x.by === 'user') user[x.k] = 1; });
+    var del = st.stds.filter(function (x) { return x.by !== 'user' && has[gKey(x.cat, x.st, x.item)]; }).map(function (x) { return x.k; });
+    var put = [];
+    der.forEach(function (d) { var o = Object.assign({ pid: st.pid }, d); o.k = S.stdKey(o); if (!user[o.k]) put.push(o); });
+    var pk = {}; put.forEach(function (o) { pk[o.k] = 1; });
+    (extraPut || []).forEach(function (o) { if (!has[gKey(o.cat, o.st, o.item)] && !pk[o.k]) put.push(o); });
+    del = del.filter(function (k) { return !pk[k]; });
+    return Promise.all([S.putStds(put, del), S.setMeta(st.pid, 'stdobs', st.stdObs || [])]).then(function () { return S.stds(st.pid); }).then(function (a) { st.stds = a; });
+  }
   function renderHeader() {
     var p = cur();
     $('projSel').innerHTML = st.projects.length > 1 ? '<option value="">切換到其他計畫…</option>' + st.projects.filter(function (x) { return x.id !== st.pid; }).map(function (x) { return opt(x.id, (x.code ? x.code + '・' : '') + x.name); }).join('') : '<option value="">' + (st.projects.length ? '（只有一個計畫）' : '（尚未建立計畫）') + '</option>';
@@ -293,7 +311,7 @@
   function renderImport() {
     var area = $('importArea'), idx = existingIndex(), pidx = phaseIndex();
     if (!pending.length) { area.innerHTML = ''; $('importBar').hidden = true; return; }
-    var tot = { n: 0, same: 0, diff: 0, tables: 0 }, seenAll = {};
+    var tot = { n: 0, same: 0, diff: 0, tables: 0, std: 0 }, seenAll = {};
     area.innerHTML = pending.map(function (f, fi) {
       var head = '<div class="file-head"><div class="file-icon ' + esc(f.ext) + '">' + esc((f.ext || '?').toUpperCase()) + '</div><div><div class="file-name">' + esc(f.name) + '</div><div class="file-sub">' +
         (f.error ? '' : '找到 ' + f.datasets.length + ' 張監測結果表' + (f.tableCount ? '（檔案共 ' + f.tableCount + ' 張表格／工作表）' : '')) + '</div></div><span class="spacer"></span><button class="btn small" data-rmfile="' + fi + '">移除</button></div>';
@@ -301,6 +319,8 @@
       return '<div class="file-card">' + head + f.datasets.map(function (ds, di) {
         var list = ds.sel ? dsRecords(ds, f.name) : [];
         var c = counts(list, idx, pidx);
+        // v1.0.13：勾選的表格帶有報告標準值，數值都相同也可以匯入（只改標準值的修正版、補回標準值分段）
+        if (ds.sel) tot.std += (ds.stds || []).filter(function (x) { return ds.itemOn[x.item] && (ds.itemCat[x.item] || ds.cat); }).length;
         if (ds.sel) {
           tot.tables++;
           list.forEach(function (r) {
@@ -340,7 +360,8 @@
     }).join('');
     $('importBar').hidden = st.sec !== 'import';
     $('importSum').innerHTML = '已勾選 <b>' + tot.tables + '</b> 張表：<span class="pill new">新增 ' + tot.n + '</span><span class="pill same">與既有資料相同（不重複存） ' + tot.same + '</span>' + (tot.diff ? '<span class="pill diff">數值不同、將以後面的檔案為準 ' + tot.diff + '（會列入資料異常檢查）</span>' : '');
-    $('importGo').disabled = !(tot.n + tot.diff);
+    $('importGo').disabled = !(tot.n + tot.diff + tot.std);
+    if (tot.std) $('importSum').innerHTML += '<span class="pill same">報告上的標準值 ' + tot.std + ' 筆（依報告期間記錄）</span>';
   }
   function previewTable(ds) {
     var rows = {}, order = [];
@@ -408,8 +429,9 @@
       if (c.src === src || (c.alsoSrc || []).indexOf(src) >= 0) return;
       c.alsoSrc = (c.alsoSrc || []).concat([src]); twUpd[e.k] = c;
     }
+    var newObs = {}, obsSeq = 0;
     pending.forEach(function (f) {
-      f.datasets.forEach(function (ds) {
+      f.datasets.forEach(function (ds, di0) {
         if (!ds.sel) return;
         dsRecords(ds, f.name).forEach(function (r) {
           var e = idx[r.k];
@@ -440,8 +462,14 @@
         });
         // 標準值（使用者改過的不覆蓋）
         // 報告上的「全部測站」只代表這張表裡的測站（不同表可能是不同海域分類、管制區），所以逐站存
-        var dsSts = [];
-        dsRecords(ds, f.name).forEach(function (r) { if (dsSts.indexOf(r.st) < 0) dsSts.push(r.st); });
+        // v1.0.13：報告帶入的標準值記成「這份報告、這個測站的採樣期間＋標準值」，之後依期間自動分段（不再互相覆蓋）
+        var dsSts = [], stRange = {}, allR = null;
+        dsRecords(ds, f.name).forEach(function (r) {
+          if (dsSts.indexOf(r.st) < 0) dsSts.push(r.st);
+          var g = stRange[r.st] = stRange[r.st] || { d1: r.iso, d2: r.iso };
+          if (r.iso < g.d1) g.d1 = r.iso; if (r.iso > g.d2) g.d2 = r.iso;
+          if (!allR) allR = { d1: r.iso, d2: r.iso }; if (r.iso < allR.d1) allR.d1 = r.iso; if (r.iso > allR.d2) allR.d2 = r.iso;
+        });
         ds.stds.forEach(function (s) {
           if (!ds.itemOn[s.item]) return;
           var ic = ds.itemCat[s.item] || ds.cat; if (!ic) return;
@@ -449,13 +477,12 @@
           var itName = ds.itemMap[s.item] || s.item;
           var variants = X.stdSeason(s.text, itName) || [{ text: s.text, lines: s.lines }];
           targets.forEach(function (stn) {
+            var rg = stRange[stn] || allR; if (!rg || !stn) return;
+            var ok2 = f.name + '\u0001' + di0 + '\u0001' + gKey(ic, stn, itName);
+            var ob = newObs[ok2];
+            if (!ob) ob = newObs[ok2] = { id: 'o' + bid + '_' + (obsSeq++), cat: ic, st: stn, item: itName, d1: rg.d1, d2: rg.d2, at: Date.now() * 1000 + obsSeq, src: f.name, bid: bid, vs: [] };
             variants.forEach(function (vv) {
-              var o = { pid: st.pid, cat: ic, st: stn, item: itName, text: vv.text, lines: vv.lines, mode: X.stdMode(vv.text, itName), m1: vv.m1 || 0, m2: vv.m2 || 0, label: s.label || '', by: 'auto', from: s.from || '', to: s.to || '' };
-              o.k = S.stdKey(o);
-              var ex = stdIdx[o.k];
-              if (ex && ex.by === 'user') return;
-              if (ex && ex.bid !== bid && !prevStd[o.k]) prevStd[o.k] = ex;
-              o.bid = bid; stdIdx[o.k] = o; stdsPut.push(o);
+              ob.vs.push({ text: vv.text, lines: vv.lines, mode: X.stdMode(vv.text, itName), m1: vv.m1 || 0, m2: vv.m2 || 0, label: s.label || '', from: s.from || '', to: s.to || '' });
             });
           });
         });
@@ -468,10 +495,16 @@
     // 復原資料只留最近 30 次匯入
     var withUndo = st.meta.log.filter(function (l) { return l.id && !l.noUndo; }), drop = withUndo.slice(0, Math.max(0, withUndo.length - 30));
     drop.forEach(function (l) { l.noUndo = 1; });
+    // 標準值：同一份報告重新匯入同一期間 → 取代舊的那筆；其他報告的保留（分段時後匯入的優先）
+    var touched = {}, nob = Object.keys(newObs).map(function (k) { return newObs[k]; });
+    nob.forEach(function (o) { touched[gKey(o.cat, o.st, o.item)] = 1; });
+    st.stdObs = (st.stdObs || []).filter(function (o) { return !nob.some(function (x) { return x.src === o.src && x.cat === o.cat && x.st === o.st && x.item === o.item && x.d1 === o.d1 && x.d2 === o.d2; }); }).concat(nob);
+    // 這次會被換掉的報告帶入標準值記下來，復原時放回去
+    st.stds.forEach(function (x) { if (x.by !== 'user' && touched[gKey(x.cat, x.st, x.item)] && !prevStd[x.k]) prevStd[x.k] = x; });
     var n = put.length;
-    Promise.all([S.putRecs(put.concat(Object.keys(twUpd).filter(function (k) { return !byK[k]; }).map(function (k) { return twUpd[k]; }))), S.putStds(stdsPut), S.setMeta(st.pid, 'undo|' + bid, { prev: prev, prevStd: prevStd }), drop.length ? S.delMeta(st.pid, drop.map(function (l) { return 'undo|' + l.id; })) : null, saveMeta()]).then(function () { return loadProject(st.pid); }).then(function () {
+    Promise.all([S.putRecs(put.concat(Object.keys(twUpd).filter(function (k) { return !byK[k]; }).map(function (k) { return twUpd[k]; }))), S.setMeta(st.pid, 'undo|' + bid, { prev: prev, prevStd: prevStd }), drop.length ? S.delMeta(st.pid, drop.map(function (l) { return 'undo|' + l.id; })) : null, saveMeta()]).then(function () { return rebuildStds(touched); }).then(function () { return loadProject(st.pid); }).then(function () {
       pending = []; renderImport(); renderLog();
-      $('importArea').innerHTML = '<div class="ok-box">✔ 已匯入 ' + n + ' 筆數值' + (conflicts.length ? '，其中 ' + conflicts.length + ' 筆與既有資料數值不同、已改用新檔（已列入「資料異常檢查」）' : '') + '。可以到「資料異常檢查」確認，或直接到「趨勢圖與報告表格」產生圖表。</div>';
+      $('importArea').innerHTML = '<div class="ok-box">✔ ' + (n ? '已匯入 ' + n + ' 筆數值' : '數值都和既有資料相同，沒有新增') + (nob.length ? '；報告上的標準值已依報告期間記錄（' + nob.length + ' 組）' : '') + (conflicts.length ? '，其中 ' + conflicts.length + ' 筆與既有資料數值不同、已改用新檔（已列入「資料異常檢查」）' : '') + '。可以到「資料異常檢查」確認，或直接到「趨勢圖與報告表格」產生圖表。</div>';
       toast('匯入完成');
     }).catch(function (e) { toast('匯入失敗：' + e.message, true); });
   });
@@ -540,6 +573,10 @@
       });
       if (!confirm('復原 ' + fmtTime(l.at) + ' 的匯入？\n\n這次匯入的 ' + recs.length + ' 筆資料會刪除' + (keepU.length ? '（另有 ' + keepU.length + ' 筆其他報告也有同一筆，會保留）' : '') + '；若當時蓋掉了舊值，會把舊值放回去。這次匯入帶進來的標準值也會一併復原（自行修改過的不動）。匯入後在「資料檢視」手動改過的數值也會一起移除。')) return;
       var stds = st.stds.filter(function (s) { return s.bid === l.id && s.by !== 'user'; });
+      // 這次匯入帶入的標準值紀錄拿掉，重算分段（v1.0.13）
+      var touchedU = {};
+      st.stdObs = (st.stdObs || []).filter(function (o) { if (o.bid !== l.id) return true; touchedU[gKey(o.cat, o.st, o.item)] = 1; return false; });
+      var remainU = {}; st.stdObs.forEach(function (o) { remainU[gKey(o.cat, o.st, o.item)] = 1; });
       // 其他資料上「這份報告也有」的註記一併拿掉（同一檔案在別次匯入還在的不動）（v1.0.7）
       var other = {}; st.meta.log.forEach(function (x) { if (x !== l && !x.undone) (x.files || []).forEach(function (f) { other[f] = 1; }); });
       var strip = (l.files || []).filter(function (f) { return !other[f]; }), alsoFix = [];
@@ -548,9 +585,11 @@
         return S.getMeta(st.pid, 'undo|' + l.id, null).then(function (ud) {
           var ps = (ud && ud.prevStd) || {}, sPut = [], sDel = [];
           stds.forEach(function (s) { if (ps[s.k]) sPut.push(ps[s.k]); else sDel.push(s.k); });
+          // 已經沒有其他報告帶入的組：放回這次匯入前的標準值
+          Object.keys(ps).forEach(function (k) { var p = ps[k]; if (touchedU[gKey(p.cat, p.st, p.item)] && !remainU[gKey(p.cat, p.st, p.item)] && sPut.indexOf(p) < 0) sPut.push(p); });
           l.undone = Date.now();
           st.meta.conflicts = st.meta.conflicts.filter(function (c) { return c.bid !== l.id; });
-          return Promise.all([S.putStds(sPut, sDel), saveMeta()]).then(function () { return res; });
+          return Promise.all([S.putStds(sPut, sDel), saveMeta()]).then(function () { return S.stds(st.pid); }).then(function (a) { st.stds = a; return rebuildStds(touchedU); }).then(function () { return res; });
         });
       }).then(function (res) { return loadProject(st.pid).then(function () { renderLog(); toast('已復原：刪除 ' + res.del + ' 筆' + (res.restored ? '、放回舊值 ' + res.restored + ' 筆' : '')); }); })
         .catch(function (err) { toast('復原失敗：' + err.message, true); });
@@ -564,8 +603,11 @@
         else if (also.indexOf(name) >= 0) { var o2 = Object.assign({}, r); o2.alsoSrc = also.filter(function (x) { return x !== name; }); keep.push(o2); }
       });
       var list = st.recs.filter(function (r) { return r.src === name && !(r.alsoSrc && r.alsoSrc.length); });
-      if (!confirm('刪除「' + name + '」匯入的 ' + list.length + ' 筆資料？\n\n若匯入時蓋掉了舊值，會把舊值放回去。標準值不會刪除（可到「測項與標準值」修改）。' + (keep.length ? '\n另有 ' + keep.length + ' 筆其他報告（例如季報）也有同一筆，會保留，只拿掉「' + name + '」的來源註記。' : ''))) return;
-      (keep.length ? S.putRecs(keep) : Promise.resolve()).then(function () { return revertRecs(list); }).then(function (res) {
+      if (!confirm('刪除「' + name + '」匯入的 ' + list.length + ' 筆資料？\n\n若匯入時蓋掉了舊值，會把舊值放回去。\n這份報告帶入的標準值：其他報告也有同一測站測項的，依其他報告重新分段；沒有的話保留不動（可到「測項與標準值」修改）。' + (keep.length ? '\n另有 ' + keep.length + ' 筆其他報告（例如季報）也有同一筆，會保留，只拿掉「' + name + '」的來源註記。' : ''))) return;
+      // 這份報告帶入的標準值紀錄拿掉，其他報告還有的組重算分段；沒有其他報告的組，標準值保留不動（v1.0.13）
+      var touchedD = {};
+      st.stdObs = (st.stdObs || []).filter(function (o) { if (o.src !== name) return true; touchedD[gKey(o.cat, o.st, o.item)] = 1; return false; });
+      (keep.length ? S.putRecs(keep) : Promise.resolve()).then(function () { return revertRecs(list); }).then(function (res) { return rebuildStds(touchedD).then(function () { return res; }); }).then(function (res) {
         st.meta.conflicts = st.meta.conflicts.filter(function (c) { return c.src !== name; });
         return saveMeta().then(function () { return loadProject(st.pid); }).then(function () { renderLog(); toast('已刪除 ' + res.del + ' 筆' + (res.restored ? '、放回舊值 ' + res.restored + ' 筆' : '')); });
       }).catch(function (err) { toast('刪除失敗：' + err.message, true); });
@@ -687,10 +729,10 @@
   /* ================= 異常檢查 ================= */
   var cFilter = '', cSym = '', cShowOk = false, lastAnoms = [];
   function shownAnoms() { return lastAnoms.filter(function (x) { return (!cFilter || x.type === cFilter) && (!cSym || x.sym === cSym); }); }
-  var TYPE_LABEL = { text: '判讀不出的數值', outlier: '異常高低值', conflict: '兩份檔案數值不同', missing: '缺測項', similar: '名稱很像的測站', sameval: '數值完全一樣的測站', ph: '疑似佔位文字', na: '無測值', pending: '等待補上', unit: '單位不一致', over: '超過標準值（提示）' };
-  function runCheck() { lastAnoms = Co.anomalies(st.recs, st.stds, { ok: cShowOk ? {} : st.meta.ok, conflicts: st.meta.conflicts }); updateBadge(); return lastAnoms; }
+  var TYPE_LABEL = { text: '判讀不出的數值', outlier: '異常高低值', conflict: '兩份檔案數值不同', missing: '缺測項', similar: '名稱很像的測站', sameval: '數值完全一樣的測站', ph: '疑似佔位文字', na: '無測值', pending: '等待補上', unit: '單位不一致', over: '超過標準值（提示）', stdconf: '兩份報告標準值不同', stdover: '標準值期間重疊' };
+  function runCheck() { lastAnoms = Co.anomalies(st.recs, st.stds, { ok: cShowOk ? {} : st.meta.ok, conflicts: st.meta.conflicts, stdConflicts: Co.deriveStds(st.stdObs || []).conflicts }); updateBadge(); return lastAnoms; }
   function updateBadge() {
-    var n = st.pid ? Co.anomalies(st.recs, st.stds, { ok: st.meta.ok, conflicts: st.meta.conflicts }).filter(function (a) { return a.level !== 'info'; }).length : 0;
+    var n = st.pid ? Co.anomalies(st.recs, st.stds, { ok: st.meta.ok, conflicts: st.meta.conflicts, stdConflicts: Co.deriveStds(st.stdObs || []).conflicts }).filter(function (a) { return a.level !== 'info'; }).length : 0;
     var b = $('checkBadge'); b.hidden = !n; b.textContent = n;
   }
   function renderCheck() {
@@ -715,6 +757,7 @@
       if (a.type === 'na' && !a.rec) act = '<button class="btn small" data-okone="' + i + '">確認 ND 無誤</button>';
       if (a.type === 'pending') act += '<span class="pill pend">等待補上</span><button class="btn small" data-unpend="' + i + '">取消等待</button>';
       if (a.type === 'sameval') act = '<button class="btn small" data-merge="' + i + '" data-to="0">同一站，歸入「' + esc(a.names[0]) + '」</button><button class="btn small" data-merge="' + i + '" data-to="1">同一站，歸入「' + esc(a.names[1]) + '」</button><button class="btn small" data-look="' + i + '">到資料檢視核對</button><button class="btn small" data-notsame="' + i + '">不是同一站，數值無誤</button>';
+      if (a.type === 'stdconf' || a.type === 'stdover') act = '<button class="btn small" data-gostd="' + i + '">到測項與標準值</button>';
       if (a.type === 'similar') act = '<button class="btn small" data-merge="' + i + '" data-to="0">歸入「' + esc(a.names[0]) + '」</button><button class="btn small" data-merge="' + i + '" data-to="1">歸入「' + esc(a.names[1]) + '」</button><button class="btn small" data-notsame="' + i + '">不是同一站</button>';
       return '<div class="anom ' + a.level + '"><input type="checkbox" data-id="' + esc(a.id) + '" data-rk="' + esc(a.rec ? a.rec.k : '') + '"><div class="a-main"><div class="a-where">' + esc(TYPE_LABEL[a.type]) + '・' + esc(where) + (a.rec && a.rec.src ? '・' + esc(a.rec.src) : '') + '</div><div class="a-msg">' + esc(a.msg) + '</div></div><div class="a-act">' + act + '</div></div>';
     }).join('') + (list.length > 600 ? '<div class="muted small">只顯示前 600 項</div>' : '');
@@ -742,6 +785,13 @@
       var a1 = shownAnoms()[+(b1.getAttribute('data-okone') || b1.getAttribute('data-pend') || b1.getAttribute('data-unpend'))]; if (!a1) return;
       if (b1.hasAttribute('data-okone')) { st.meta.ok[a1.id] = Date.now(); saveMeta().then(function () { renderCheck(); toast('已確認'); }); }
       else setPending([a1.rec], b1.hasAttribute('data-pend'));
+      return;
+    }
+    var gs = e.target.closest('[data-gostd]');
+    if (gs) {   // v1.0.13：標準值的提醒 → 到標準值頁，篩選那個測項（與測站）
+      var ga = shownAnoms()[+gs.getAttribute('data-gostd')]; if (!ga) return;
+      go('std'); $('sCat').value = ga.cat; renderStd();
+      $('sfItem').value = ga.item || ''; $('sfSt').value = ga.st && ga.st !== '*' ? ga.st : ''; renderStd();
       return;
     }
     var lk = e.target.closest('[data-look]');
@@ -807,10 +857,15 @@
     st.meta.conflicts.forEach(function (c) { if (c.cat === cat && c.k && c.k.split('|')[2] === from) { var a = c.k.split('|'); a[2] = to; (c.mk = c.mk || {})[mid] = c.k; c.k = a.join('|'); } });
     st.meta.conflicts = st.meta.conflicts.concat(confs).slice(-1000);
     st.meta.merges.push({ id: mid, cat: cat, from: from, to: to, at: now, n: moved.length, same: same, conf: confs.length, sDrop: sDrop });
-    var undo = { put: put.map(function (r) { return r.k; }), moved: moved, sPut: sPut.map(function (x) { return x.k; }), sMoved: sMoved, alPrev: alPrev, tOrig: Object.keys(tOrig).map(function (k) { return tOrig[k]; }) };
+    // 報告帶入的標準值紀錄也改到目標測站，兩站的報告一起依期間分段（v1.0.13）
+    var obsIds = [];
+    (st.stdObs || []).forEach(function (o) { if (o.cat === cat && o.st === from) { o.st = to; obsIds.push(o.id); } });
+    var undo = { put: put.map(function (r) { return r.k; }), moved: moved, sPut: sPut.map(function (x) { return x.k; }), sMoved: sMoved, alPrev: alPrev, tOrig: Object.keys(tOrig).map(function (k) { return tOrig[k]; }), obsIds: obsIds };
     put = put.concat(Object.keys(tPut).map(function (k) { return tPut[k]; }));
-    return Promise.all([S.putRecs(put, del), S.putStds(sPut, sDel), S.setMeta(st.pid, 'merge|' + mid, undo), saveMeta()])
+    var mg = {}; mg[gKey(cat, to, '*')] = 1; mg[gKey(cat, from, '*')] = 1;
+    return Promise.all([S.putRecs(put, del), S.putStds(sPut, sDel), S.setMeta(st.pid, 'merge|' + mid, undo), S.setMeta(st.pid, 'stdobs', st.stdObs || []), saveMeta()])
       .then(function () { return loadProject(st.pid); })
+      .then(function () { return obsIds.length ? rebuildStds(mg) : null; })
       .then(function () { return { n: moved.length, same: same, conf: confs.length, sDrop: sDrop }; });
   }
   function mergeBlocked(m) {   // 歸入之後 to 又被歸入別站，要先取消後面那次
@@ -840,8 +895,12 @@
       st.meta.conflicts.forEach(function (c) { if (c.mk && c.mk[id]) { c.k = c.mk[id]; delete c.mk[id]; } });   // 歸入時改到新測站的舊衝突紀錄改回來
       st.meta.merges = st.meta.merges.filter(function (x) { return x.id !== id; });
       var restoreT = (u.tOrig || []).filter(function (r) { return cur[r.k]; }).map(function (r) { var c = cur[r.k], o = Object.assign({}, c); if (r.alsoSrc) o.alsoSrc = r.alsoSrc; else delete o.alsoSrc; return o; });
-      return Promise.all([S.putRecs(moved.concat(restoreT), delK), S.putStds(u.sMoved, u.sPut), S.delMeta(st.pid, ['merge|' + id]), saveMeta()]);
-    }).then(function () { return loadProject(st.pid); });
+      var ids = u.obsIds || [];
+      (st.stdObs || []).forEach(function (o) { if (ids.indexOf(o.id) >= 0) o.st = m.from; });
+      return Promise.all([S.putRecs(moved.concat(restoreT), delK), S.putStds(u.sMoved, u.sPut), S.delMeta(st.pid, ['merge|' + id]), S.setMeta(st.pid, 'stdobs', st.stdObs || []), saveMeta()]).then(function () { return ids.length; });
+    }).then(function (nIds) {
+      return loadProject(st.pid).then(function () { if (!nIds) return; var mg = {}; mg[gKey(m.cat, m.to, '*')] = 1; mg[gKey(m.cat, m.from, '*')] = 1; return rebuildStds(mg); });
+    });
   }
   function mergeMsg(r, from, to) {
     return '已把「' + from + '」的 ' + r.n + ' 筆資料歸入「' + to + '」' + (r.same ? '（其中 ' + r.same + ' 筆兩站數值相同，合成一筆）' : '') + (r.conf ? '；' + r.conf + ' 筆同一天數值不同，保留「' + to + '」的值並列入資料異常檢查' : '') + (r.sDrop ? '；' + r.sDrop + ' 筆標準值「' + to + '」已有，沿用「' + to + '」的' : '');
@@ -867,11 +926,14 @@
     $('sCat').innerHTML = cats.map(function (c) { return opt(c, c, c === cat); }).join('') || '<option value="">（還沒有資料）</option>';
     var cg = Co.catalog(st.recs.filter(function (r) { return true; }), cat, null);
     var list = st.stds.filter(function (s) { return s.cat === cat; });
+    var ovl = {}; Co.stdOverlaps(list).forEach(function (p) { ovl[p[0].k] = 1; ovl[p[1].k] = 1; });   // v1.0.13：期間重疊、數值不同
     var groups = {}, order = [];
     list.forEach(function (s) {
       var g = s.item + '\u0001' + (s.from || '') + '\u0001' + (s.to || '') + '\u0001' + (s.m1 || '') + '-' + (s.m2 || '') + '\u0001' + (s.mode || '') + '\u0001' + s.text + '\u0001' + (s.label || '');   // v1.0.6：說明不同（例如丁類、乙類）不合併成一列
       if (!groups[g]) { groups[g] = { item: s.item, text: s.text, lines: s.lines, label: s.label, by: s.by, from: s.from || '', to: s.to || '', m1: s.m1 || 0, m2: s.m2 || 0, mode: s.mode || X.stdMode(s.text || '', s.item), keys: [], sts: [] }; order.push(g); }
       groups[g].keys.push(s.k); groups[g].sts.push(s.st === '*' ? '全部測站' : s.st);
+      if (ovl[s.k]) groups[g].ovl = 1;
+      if (s.seg) groups[g].seg = 1;
       if (s.by === 'user') groups[g].by = 'user';
     });
     order.sort(function (a, b) { return a < b ? -1 : 1; });
@@ -898,11 +960,11 @@
     var af = $('sAddForm');
     if (!af.hidden && (af.dataset.cat !== cat || af.dataset.pid !== st.pid)) { $('sCat').value = cat; openAddForm(false); }
     $('sTable').innerHTML = stdGroups.length ? '<table class="t std-t"><thead><tr><th>測項</th><th>標準值</th><th>判定方式</th><th>適用月份<br><span class="small muted">格式 5-9、10-4<br>空白＝全年</span></th><th>適用期間 起<br><span class="small muted">格式 112.01.01<br>空白＝不限</span></th><th>適用期間 迄<br><span class="small muted">格式 112.12.31<br>空白＝不限</span></th><th>畫線<br>數值</th><th>適用測站</th><th>說明／來源</th><th></th></tr></thead><tbody>' + stdGroups.map(function (g, i) {
-      return '<tr><td>' + esc(g.item) + '</td><td><input class="cell" style="width:100px;text-align:left" data-sg="' + i + '" value="' + esc(g.text) + '"></td>' +
+      return '<tr' + (g.ovl ? ' class="ovl" title="與同一測站同一測項的另一筆標準值適用期間重疊、數值不同，請替其中一筆填適用期間"' : '') + '><td>' + esc(g.item) + (g.ovl ? '<div class="ovl-note">⚠ 與另一筆期間重疊</div>' : '') + '</td><td><input class="cell" style="width:100px;text-align:left" data-sg="' + i + '" value="' + esc(g.text) + '"></td>' +
         '<td><select class="cell" data-sgm="' + i + '">' + MODE_OPTS.map(function (m) { return opt(m[0], m[1], m[0] === g.mode); }).join('') + '</select></td>' +
         '<td><input class="cell" style="width:92px;text-align:left" list="monthPresets" data-sgmo="' + i + '" value="' + esc(g.m1 ? g.m1 + '-' + g.m2 : '') + '" placeholder="全年" title="格式：5-9（5～9 月）、10-4（10 月～翌年 4 月）；空白＝全年"><div class="small muted">' + esc(Co.monthNote(g)) + '</div></td>' +
         '<td><input class="cell" style="width:105px;text-align:left" data-sgf="' + i + '" value="' + esc(g.from ? Co.rocDate(g.from) : '') + '" placeholder="不限" title="格式：112.01.01；空白＝不限"></td><td><input class="cell" style="width:105px;text-align:left" data-sgt="' + i + '" value="' + esc(g.to ? Co.rocDate(g.to) : '') + '" placeholder="不限" title="格式：112.12.31；空白＝不限"></td>' +
-        '<td>' + esc(g.lines.join('、')) + '</td><td class="st-cell">' + esc(g.sts.join('、')) + '</td><td class="note-cell">' + (g.label ? esc(g.label) + '<br>' : '') + '<span class="small muted">' + (g.by === 'user' ? '自行設定' : '報告帶入') + '</span></td><td><button class="btn small danger" data-sgdel="' + i + '">刪除</button></td></tr>';
+        '<td>' + esc(g.lines.join('、')) + '</td><td class="st-cell">' + esc(g.sts.join('、')) + '</td><td class="note-cell">' + (g.label ? esc(g.label) + '<br>' : '') + '<span class="small muted">' + (g.by === 'user' ? '自行設定' : g.seg ? '報告帶入（依期間分段）' : '報告帶入') + '</span></td><td><button class="btn small danger" data-sgdel="' + i + '">刪除</button></td></tr>';
     }).join('') + '</tbody></table>' : '<div class="empty">這個類別還沒有標準值，按「＋ 新增一筆標準值」設定</div>';
     renderItemTable(cat, cg);
     renderStationTable(cat);
@@ -1082,8 +1144,11 @@
     if (fd && td && fd.iso > td.iso) return toast('起日不能晚於迄日', true);
     var o = { pid: st.pid, cat: cat, st: $('saSt').value, item: $('saItem').value, text: text, lines: X.stdLines(text), mode: $('saMode').value, m1: mm ? mm[0] : 0, m2: mm ? mm[1] : 0, label: $('saNote').value.trim(), by: 'user', from: fd ? fd.iso : '', to: td ? td.iso : '' };
     o.k = S.stdKey(o);
+    // v1.0.13：會蓋掉既有的同一筆（同測站、測項、期間、月份）時先確認
+    var exS = st.stds.filter(function (x) { return x.k === o.k; })[0];
+    if (exS && !confirm('「' + (o.st === '*' ? '全部測站' : o.st) + '」的「' + o.item + '」已經有一筆標準值 ' + Co.stdLabel(exS) + '（適用期間、月份相同）。\n\n要改成 ' + text + ' 嗎？\n\n如果是換地點或標準改了，舊的不是填錯，請按「取消」，先替舊的那筆填「適用期間 迄」，新增這筆時填「適用期間 起」。')) return;
     S.putStds([o]).then(function () { return loadProject(st.pid); }).then(function () {
-      renderStd(); toast('已新增：' + o.item + ' ' + Co.stdLabel(o));
+      renderStd(); toast((exS ? '已修改：' : '已新增：') + o.item + ' ' + Co.stdLabel(o));
       $('saText').value = ''; $('saMon').value = ''; $('saText').focus();
     });
   });
@@ -1196,7 +1261,7 @@
     st.meta.chartForm = { cat: $('gCat').value, fromY: +$('gFromY').value, fromM: +$('gFromM').value, toY: +$('gToY').value, toM: +$('gToM').value, mode: radio('gMode'), x: radio('gX'), split: radio('gSplit'), sts: checkedVals('gSts'), items: checkedVals('gItems'), gStd: $('gStd').checked, gZero: $('gZero').checked, gND: $('gND').checked, gLT: $('gLT').checked, gNA: $('gNA').checked, gPH: $('gPH').checked, gStTitle: $('gStTitle').checked, gStdAxis: $('gStdAxis').checked };
     saveMeta();
   }
-  function drawOpts(scale) { return { scale: scale, std: $('gStd').checked, stdAxis: $('gStdAxis').checked, zero: $('gZero').checked, marks: { nd: $('gND').checked, lt: $('gLT').checked, na: $('gNA').checked, ph: $('gPH').checked }, stationInTitle: $('gStTitle').checked }; }
+  function drawOpts(scale) { return { scale: scale, std: $('gStd').checked, stdAxis: $('gStdAxis').checked, zero: $('gZero').checked, marks: { nd: $('gND').checked, lt: $('gLT').checked, na: $('gNA').checked, ph: $('gPH').checked }, stationInTitle: $('gStTitle').checked, yRange: yrOf((lastChartOpts && lastChartOpts.cat) || $('gCat').value) }; }
   $('gGo').addEventListener('click', function () {
     if (!needProject()) return;
     saveForm();
@@ -1273,7 +1338,40 @@
     if (e.target.checked) delete figOff[+i]; else figOff[+i] = 1;
     applyFigFilter();
   });
+  /* Y 軸範圍（依測項；v1.0.13）：st.meta.yRange[類別][測項] = { min, max }，空白＝自動 */
+  function yrOf(cat) { return ((st.meta && st.meta.yRange) || {})[cat] || {}; }
+  function renderYr() {
+    var box = $('gYr'); if (!box) return;
+    var cat = $('gCat').value, items = checkedVals('gItems'), yr = yrOf(cat);
+    var cg = cat ? Co.catalog(st.recs, cat, periodSel()) : { textItems: {}, units: {} };
+    items = items.filter(function (i) { return !(cg.textItems || {})[i]; });
+    if (!items.length) { box.innerHTML = '<span class="small muted">勾選測項後，可在這裡設定各測項的 Y 軸範圍</span>'; return; }
+    var bad = [];
+    box.innerHTML = items.map(function (it) {
+      var r = yr[it] || {}, u = (cg.units || {})[it] || '';
+      var wrong = r.min != null && r.max != null && r.min >= r.max; if (wrong) bad.push(it);
+      return '<div class="yr-row"><span class="yr-name">' + esc(it) + '</span>' +
+        '<input type="text" inputmode="decimal" placeholder="自動" title="下限" data-yr="min" data-it="' + esc(it) + '" value="' + (r.min != null ? r.min : '') + '"' + (wrong ? ' class="bad"' : '') + '>～' +
+        '<input type="text" inputmode="decimal" placeholder="自動" title="上限" data-yr="max" data-it="' + esc(it) + '" value="' + (r.max != null ? r.max : '') + '"' + (wrong ? ' class="bad"' : '') + '><span class="yr-unit">' + esc(u) + '</span></div>';
+    }).join('') + (bad.length ? '<div class="yr-msg">⚠ ' + esc(bad.join('、')) + '：下限要小於上限，這組設定先不套用</div>' : '');
+  }
+  $('gYr').addEventListener('change', function (e) {
+    var el = e.target.closest('input[data-yr]'); if (!el || !st.pid) return;
+    var cat = $('gCat').value; if (!cat) return;
+    var v = el.value.trim().replace(/，/g, '.'), num = v === '' ? null : +v;
+    if (v !== '' && !isFinite(num)) { toast('請填數字（或留空＝自動）', true); el.value = ''; num = null; }
+    var all = st.meta.yRange = st.meta.yRange || {}, c = all[cat] = all[cat] || {}, it = el.getAttribute('data-it'), r = c[it] = c[it] || {};
+    r[el.getAttribute('data-yr')] = num;
+    if (r.min == null && r.max == null) delete c[it];
+    saveMeta(); renderYr(); redrawCharts();
+  });
+  // 已經產生的圖依新設定重畫（不必再按一次「產生趨勢圖」）
+  function redrawCharts() {
+    if (!lastCharts || !lastCharts.length) return;
+    Array.prototype.forEach.call($('gOut').querySelectorAll('canvas'), function (cv) { var c = lastCharts[+cv.getAttribute('data-i')]; if (c) CH.draw(cv, c, drawOpts(Math.min(2, window.devicePixelRatio || 1))); });
+  }
   function updatePlan() {
+    renderYr();
     var ns = checkedVals('gSts').length, ni = checkedVals('gItems').length;
     $('gPlan').textContent = ns && ni ? '目前勾選 ' + ns + ' 個測站、' + ni + ' 個測項' + (radio('gMode') === 'item' ? '，最多 ' + ni + ' 張圖' : '，最多 ' + ns * ni + ' 張圖') : '還沒有勾選測站或測項';
   }
@@ -1310,7 +1408,7 @@
     var o = lastChartOpts, p = cur();
     var tables = Co.reportTables(st.recs, st.stds, { cat: o.cat, period: o.period, stations: o.stations, items: o.tableItems, split: radio('gSplit') });
     $('gMsg').textContent = '產生 Excel 中…';
-    XO.build(window.ExcelJS, window.JSZip, { project: p ? (p.code ? p.code + ' ' : '') + p.name : '', cat: o.cat, periodText: periodText(o.period), tables: tables, charts: pickedCharts(), mode: o.mode, std: $('gStd').checked, zero: $('gZero').checked })
+    XO.build(window.ExcelJS, window.JSZip, { project: p ? (p.code ? p.code + ' ' : '') + p.name : '', cat: o.cat, periodText: periodText(o.period), tables: tables, charts: pickedCharts(), mode: o.mode, std: $('gStd').checked, zero: $('gZero').checked, yRange: yrOf(o.cat) })
       .then(function (buf) { download(safeName(fileBase()) + '.xlsx', buf, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); $('gMsg').textContent = '已下載 Excel'; })
       .catch(function (e) { $('gMsg').textContent = ''; toast('Excel 產生失敗：' + e.message, true); });
   });

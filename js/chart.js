@@ -22,17 +22,54 @@
   }
   function decOf(step) { var d = 0; while (d < 5 && Math.abs(Math.round(step * Math.pow(10, d)) - step * Math.pow(10, d)) > 1e-7) d++; return d; }
   function fmt(v, d) { return (Math.round(v * Math.pow(10, d)) / Math.pow(10, d)).toFixed(d); }
+  function uniqStd(a) { var seen = {}; return a.filter(function (l) { var k = l.v + '|' + (l.period || ''); if (seen[k]) return false; seen[k] = 1; return true; }); }
   function fmtStd(v) { return String(+v.toPrecision(6)); }
   function yTitleOf(spec) { return spec.unit ? spec.title + ' (' + spec.unit + ')' : spec.title; }
   function stdText(ln, unit) { return '標準值 ' + fmtStd(ln.v) + (unit ? ' ' + unit : '') + (ln.period ? '（' + ln.period + '）' : '') + (ln.sts && ln.suffix ? ln.suffix : ''); }
 
+  // 使用者自訂的 Y 軸上下限（依測項；v1.0.13）。不合理（下限 ≥ 上限）就不用
+  function userRange(spec, o) {
+    var yr = o.yRange && o.yRange[spec.item];
+    if (!yr) return null;
+    var a = yr.min != null && isFinite(yr.min) ? +yr.min : null, b = yr.max != null && isFinite(yr.max) ? +yr.max : null;
+    if (a == null && b == null) return null;
+    if (a != null && b != null && a >= b) return null;
+    return { min: a, max: b };
+  }
+  // 固定上下限的刻度：中間用整齊的間距，兩端一定標出設定值（太靠近兩端的整齊刻度拿掉）
+  function fixedScale(lo, hi, want) {
+    var raw = (hi - lo) / Math.max(1, (want || 6) - 1), mag = Math.pow(10, Math.floor(Math.log10(raw))), r = raw / mag;
+    var step = (r <= 1 ? 1 : r <= 2 ? 2 : r <= 2.5 ? 2.5 : r <= 5 ? 5 : 10) * mag, ticks = [lo];
+    // 優先用能把上下限平均切成 3～8 格的整齊間距（例：0～14 → 每 2 一格），刻度才會等距
+    var cands = [];
+    [-1, 0, 1].forEach(function (e) { [1, 2, 2.5, 5].forEach(function (m) { cands.push(m * mag * Math.pow(10, e)); }); });
+    var even = cands.filter(function (st) { var k = (hi - lo) / st; return Math.abs(k - Math.round(k)) < 1e-6 && Math.round(k) >= 3 && Math.round(k) <= 8 && Math.abs(lo / st - Math.round(lo / st)) < 1e-6; })
+      .sort(function (x, y) { return Math.abs((hi - lo) / x - 6) - Math.abs((hi - lo) / y - 6); });
+    if (even.length) step = even[0];
+    for (var t = Math.ceil(lo / step - 1e-9) * step; t < hi - 1e-9; t += step) {
+      var v = Math.round(t / step) * step;
+      if (v - lo > step * 0.4 && hi - v > step * 0.4) ticks.push(v);
+    }
+    ticks.push(hi);
+    return { min: lo, max: hi, step: step, ticks: ticks, fixed: true };
+  }
   function range(spec, o) {
+    var ur = userRange(spec, o);
     var lo = Infinity, hi = -Infinity;
     spec.series.forEach(function (s) { s.values.forEach(function (v) { if (v && v.num != null) { lo = Math.min(lo, v.num); hi = Math.max(hi, v.num); } }); });
     if (o.std !== false && o.stdAxis !== false) (spec.stdLines || []).forEach(function (l) { lo = Math.min(lo, l.v); hi = Math.max(hi, l.v); });
     if (!isFinite(lo)) { lo = 0; hi = 1; }
     if (o.zero !== false && lo >= 0) lo = 0;
-    return niceScale(lo, hi + (hi - lo) * 0.08, 6);
+    var auto = niceScale(lo, hi + (hi - lo) * 0.08, 6);
+    if (!ur) return auto;
+    var a = ur.min != null ? ur.min : auto.min, b = ur.max != null ? ur.max : auto.max;
+    if (a >= b) { if (ur.max == null) b = niceScale(a, a + Math.abs(a || 1), 6).max; else a = niceScale(b - Math.abs(b || 1), b, 6).min; }
+    return fixedScale(a, b, 6);
+  }
+  function decOfScale(sc) {
+    var d = decOf(sc.step);
+    if (sc.fixed) [sc.min, sc.max].forEach(function (v) { d = Math.max(d, decOf(v)); });
+    return Math.min(d, 5);
   }
 
   /* ---------- 畫布 ---------- */
@@ -67,8 +104,13 @@
     var multi = spec.series.length > 1 || spec.kind === 'item';
     var fs = { title: 21, axis: 16, tick: 14, legend: 14, std: 14 };
     function font(sz, bold) { return (bold ? 'bold ' : '') + sz + 'px ' + FONT; }
-    var sc = range(spec, o), dec = decOf(sc.step);
+    var sc = range(spec, o), dec = decOfScale(sc);
     var n = spec.cats.length, ns = spec.series.length;
+    // 超出自訂範圍的數值：長條截在邊界，標出實際數值（▲ 超過上限、▼ 低於下限）
+    var clipUp = [], clipDn = [];
+    if (sc.fixed) spec.series.forEach(function (s, si) { s.values.forEach(function (v, i) { if (!v || v.num == null) return; if (v.num > sc.max) clipUp.push({ si: si, i: i, t: '▲' + v.raw }); else if (v.num < sc.min) clipDn.push({ si: si, i: i, t: '▼' + v.raw }); }); });
+    // 標準值超出自訂範圍：不畫線，在圖上方註明
+    var outStd = sc.fixed && o.std !== false ? uniqStd((spec.stdLines || []).filter(function (l) { return l.v < sc.min || l.v > sc.max; })) : [];
     var titleText = spec.kind === 'station' && o.stationInTitle ? spec.station + '　' + spec.title : spec.title;
     ctx.save();
     ctx.font = font(fs.title, true);
@@ -77,11 +119,16 @@
     var tickW = Math.max.apply(null, sc.ticks.map(function (t) { return ctx.measureText(fmt(t, dec)).width; }));
     var stdList = o.std !== false ? (spec.stdLines || []).filter(function (l) { return l.v >= sc.min && l.v <= sc.max; }) : [];
     var band = []; // 放不進圖內的標準值標籤
-    var L;
+    var L, L0 = null;
     for (var pass = 0; pass < 3; pass++) {
       L = {};
-      var topBand = band.length ? band.length * (fs.std + 8) + 6 : 0;
-      L.top = 14 + titleLines.length * (fs.title + 6) + 10 + topBand;
+      var nBand = band.length + outStd.length;
+      var topBand = nBand ? nBand * (fs.std + 8) + 6 : 0;
+      ctx.font = font(fs.tick, true);
+      L.clipW = Math.max.apply(null, clipUp.map(function (c) { return ctx.measureText(c.t).width; }).concat([0]));
+      L.clipH = clipUp.length ? fs.tick + 8 : 0; // 先假設橫寫，下面算出長條寬度後再決定要不要直寫
+      if (pass > 0 && L0 && L0.clipVert) L.clipH = L.clipW + 8;
+      L.top = 14 + titleLines.length * (fs.title + 6) + 10 + topBand + L.clipH;
       L.bandTop = 14 + titleLines.length * (fs.title + 6) + 6;
       ctx.font = font(fs.axis);
       var yLinesTry = [yTitleOf(spec)];
@@ -116,6 +163,7 @@
       // 長條位置
       L.barW = Math.max(2, Math.min(multi ? 34 : 56, L.slot * 0.72 / ns));
       L.groupW = L.barW * ns;
+      L.clipVert = clipUp.length && L.clipW + 4 > L.slot / ns;
       L.bars = [];
       spec.series.forEach(function (s, si) {
         s.values.forEach(function (v, i) {
@@ -159,7 +207,10 @@
         }
         if (ok) L.labels.push(ok); else newBand.push(ln);
       });
-      if (!newBand.length) break;
+      var vertChanged = L.clipVert && L.clipH < L.clipW + 8;
+      L0 = L;
+      if (!newBand.length && !vertChanged) break;
+      if (!newBand.length) continue;
       // 只要有一條放不進圖內，就全部放到上方說明列，比較整齊
       band = stdList.filter(function (l) { return l.lead !== false; }).sort(function (a, b) { return b.v - a.v; });
     }
@@ -215,6 +266,25 @@
         });
       });
     }
+    // 超出自訂範圍的長條：標出實際數值
+    if (clipUp.length || clipDn.length) {
+      ctx.font = font(fs.tick, true); ctx.fillStyle = '#b3261e';
+      var lab = function (c, up) {
+        var x = L.left + L.slot * c.i + (L.slot - L.groupW) / 2 + L.barW * c.si + L.barW / 2;
+        var w = ctx.measureText(c.t).width, vert = w + 4 > L.slot / ns;
+        ctx.save();
+        if (up) {
+          ctx.translate(x, L.top - 3);
+          if (vert) { ctx.rotate(-Math.PI / 2); ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; } else { ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; }
+        } else {
+          ctx.translate(x, L.top + L.plotH - 3);
+          if (vert) { ctx.rotate(-Math.PI / 2); ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; } else { ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; }
+        }
+        ctx.fillText(c.t, 0, 0); ctx.restore();
+      };
+      clipUp.forEach(function (c) { lab(c, true); });
+      clipDn.forEach(function (c) { lab(c, false); });
+    }
     // 標準線
     stdList.forEach(function (ln) {
       var y = Math.round(L.y(ln.v)) + 0.5;
@@ -232,6 +302,13 @@
       ctx.save(); ctx.strokeStyle = STD; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
       ctx.beginPath(); ctx.moveTo(x, y + 0.5); ctx.lineTo(x + 30, y + 0.5); ctx.stroke(); ctx.restore();
       ctx.textBaseline = 'middle'; ctx.fillText(txt, x + 38, y);
+    });
+    // 超出自訂 Y 軸範圍、沒畫的標準值
+    outStd.forEach(function (ln, k) {
+      var y = L.bandTop + (band.length + k) * (fs.std + 8) + fs.std / 2 + 2;
+      var txt = '※ ' + stdText(ln, spec.unit) + ' 超出 Y 軸範圍，未畫線', tw = ctx.measureText(txt).width;
+      ctx.textBaseline = 'middle'; ctx.textAlign = 'left'; ctx.fillStyle = STD;
+      ctx.fillText(txt, L.left + Math.max(0, (L.plotW - tw) / 2), y);
     });
     // 外框
     ctx.strokeStyle = '#8a93a6'; ctx.lineWidth = 1;
@@ -296,7 +373,9 @@
         '<c:cat>' + strRef(x.catRef, spec.cats) + '</c:cat><c:val>' + numRef(s.valRef, s.vals) + '</c:val><c:smooth val="0"/></c:ser>';
     }).join('');
     var axFont = txPr(1000, 0);
-    var scaling = '<c:scaling><c:orientation val="minMax"/>' + (x.zero !== false ? '<c:min val="0"/>' : '') + '</c:scaling>';
+    // v1.0.13：使用者自訂的 Y 軸上下限一起套用（Excel 裡仍可自行修改）；順序須為 orientation → max → min
+    var ur = userRange(x.spec, { yRange: x.yRange }), yMin = ur && ur.min != null ? ur.min : (x.zero !== false ? 0 : null);
+    var scaling = '<c:scaling><c:orientation val="minMax"/>' + (ur && ur.max != null ? '<c:max val="' + ur.max + '"/>' : '') + (yMin != null ? '<c:min val="' + yMin + '"/>' : '') + '</c:scaling>';
     var nStd = (x.stdSeries || []).length;
     var noLegend = !multi && !nStd;
     // 每站一張：圖例只放標準值（放在上方）；各站並列：圖例放下方（測站＋標準值）
@@ -366,5 +445,5 @@
     });
   }
 
-  return { draw: draw, barChartXml: barChartXml, inject: inject, niceScale: niceScale, PALETTE: PALETTE, stdText: stdText, yTitleOf: yTitleOf };
+  return { draw: draw, barChartXml: barChartXml, inject: inject, niceScale: niceScale, range: range, PALETTE: PALETTE, stdText: stdText, yTitleOf: yTitleOf };
 });

@@ -443,3 +443,57 @@ test('#32 測站自己的季節性標準只取代重疊月份的全部測站標�
   assert.deepEqual(Co.stdsFor(S, '放', '甲站', '懸浮固體').map(s => s.text), ['30'], '全年都重疊：仍只用測站自己的');
   assert.deepEqual(Co.stdsFor(S, '放', '乙站', '水溫').map(s => s.text), ['35']);
 });
+
+test('#33 Y 軸範圍可依測項自訂（只填上限或下限也可以），Excel 圖表一起套用', () => {
+  const spec = { kind: 'station', title: 'pH', item: 'pH', unit: '', cats: ['a', 'b'], series: [{ name: '甲', values: [{ num: 7.2, raw: '7.2' }, { num: 15, raw: '15' }] }], stdLines: [{ v: 6 }, { v: 9 }] };
+  const auto = CH.range(spec, { std: true });
+  assert.ok(auto.max >= 15 && !auto.fixed);
+  const both = CH.range(spec, { std: true, yRange: { pH: { min: 0, max: 14 } } });
+  assert.equal(both.min, 0); assert.equal(both.max, 14); assert.equal(both.ticks[0], 0); assert.equal(both.ticks[both.ticks.length - 1], 14);
+  const onlyMax = CH.range(spec, { std: true, yRange: { pH: { min: null, max: 10 } } });
+  assert.equal(onlyMax.min, 0); assert.equal(onlyMax.max, 10);
+  const onlyMin = CH.range(spec, { std: true, zero: false, yRange: { pH: { min: 5, max: null } } });
+  assert.equal(onlyMin.min, 5); assert.ok(onlyMin.max >= 15);
+  const bad = CH.range(spec, { std: true, yRange: { pH: { min: 10, max: 5 } } });
+  assert.ok(!bad.fixed, '下限 ≥ 上限：不套用');
+  const other = CH.range(spec, { std: true, yRange: { 水溫: { min: 0, max: 50 } } });
+  assert.ok(!other.fixed, '別的測項的設定不影響');
+  const xml = CH.barChartXml({ spec, catRef: "'s'!$A$2:$A$3", series: [{ nameRef: "'s'!$B$1", valRef: "'s'!$B$2:$B$3" }], stdSeries: [], yRange: { pH: { min: 0, max: 14 } } });
+  assert.ok(/<c:valAx><c:axId val="5002"\/><c:scaling><c:orientation val="minMax"\/><c:max val="14"\/><c:min val="0"\/><\/c:scaling>/.test(xml), xml.slice(xml.indexOf('<c:valAx>'), xml.indexOf('<c:valAx>') + 160));
+  const xml2 = CH.barChartXml({ spec, catRef: "'s'!$A$2:$A$3", series: [{ nameRef: "'s'!$B$1", valRef: "'s'!$B$2:$B$3" }], stdSeries: [] });
+  assert.ok(/<c:valAx><c:axId val="5002"\/><c:scaling><c:orientation val="minMax"\/><c:min val="0"\/><\/c:scaling>/.test(xml2), '沒設定時和以前一樣');
+});
+
+test('#33b 報告帶入的標準值依報告期間自動分段（A→B→A→C、亂序匯入、修正版、同一天兩份不同）', () => {
+  const V = t => [{ text: t, lines: [+t], mode: 'max' }];
+  const ob = (src, d1, d2, t, at) => ({ cat: '噪', st: '甲', item: 'Leq', d1, d2, at, src, vs: V(t) });
+  let obs = [ob('三.doc', '2025-07-10', '2025-09-20', '72', 1), ob('一.doc', '2025-01-10', '2025-03-20', '72', 2), ob('二.doc', '2025-04-10', '2025-06-20', '67', 3), ob('四.doc', '2025-10-10', '2025-12-20', '70', 4)];
+  let r = Co.deriveStds(obs);
+  assert.deepEqual(r.stds.map(s => [s.text, s.from, s.to]), [['72', '', '2025-04-09'], ['67', '2025-04-10', '2025-07-09'], ['72', '2025-07-10', '2025-10-09'], ['70', '2025-10-10', '']]);
+  assert.equal(r.conflicts.length, 0);
+  const S = r.stds.map(s => Object.assign({ by: 'auto' }, s));
+  assert.deepEqual(['2025-02-01', '2025-05-01', '2025-08-01', '2025-11-01'].map(d => Co.stdFor(S, '噪', '甲', 'Leq', d).text), ['72', '67', '72', '70']);
+  obs = obs.concat([ob('二修正.doc', '2025-04-10', '2025-06-20', '70', 5)]);
+  r = Co.deriveStds(obs);
+  assert.deepEqual(r.stds.map(s => s.text), ['72', '70', '72', '70'], '後匯入的修正版取代');
+  assert.equal(r.conflicts.length, 1); assert.equal(r.conflicts[0].old, '67'); assert.equal(r.conflicts[0].now, '70');
+  // 相鄰同值合併
+  r = Co.deriveStds([ob('a', '2025-01-01', '2025-01-01', '72', 1), ob('b', '2025-04-01', '2025-04-01', '72', 2)]);
+  assert.deepEqual(r.stds.map(s => [s.text, s.from, s.to]), [['72', '', '']]);
+  // 季節性（水溫 5～9 月 38、10～4 月 35）兩筆一起分段
+  const W = [{ text: '38', lines: [38], mode: 'max', m1: 5, m2: 9 }, { text: '35', lines: [35], mode: 'max', m1: 10, m2: 4 }];
+  r = Co.deriveStds([{ cat: '放', st: '甲', item: '水溫', d1: '2025-02-01', d2: '2025-02-01', at: 1, src: 'a', vs: W }]);
+  assert.deepEqual(r.stds.map(s => [s.text, s.m1, s.m2]), [['38', 5, 9], ['35', 10, 4]]);
+});
+
+test('#34/#35 自己設定的優先於報告帶入；自己設定的兩筆期間重疊會提醒', () => {
+  const auto = { cat: '噪', st: '甲', item: 'Leq', lines: [72], text: '72', by: 'auto', k: 'a' };
+  const user = { cat: '噪', st: '甲', item: 'Leq', lines: [67], text: '67', by: 'user', from: '2025-04-01', k: 'u' };
+  assert.deepEqual(Co.stdsFor([auto, user], '噪', '甲', 'Leq', '2025-02-01').map(s => s.text), ['72'], '自己設定的期間外仍用報告帶入');
+  assert.deepEqual(Co.stdsFor([auto, user], '噪', '甲', 'Leq', '2025-06-01').map(s => s.text), ['67']);
+  assert.equal(Co.stdOverlaps([auto, user]).length, 0, '自己設定取代報告帶入是預期的，不提醒');
+  const user2 = { cat: '噪', st: '甲', item: 'Leq', lines: [70], text: '70', by: 'user', k: 'u2' };
+  assert.equal(Co.stdOverlaps([auto, user, user2]).length, 1);
+  const an = Co.anomalies([], [auto, user, user2], {});
+  assert.equal(an.filter(a => a.type === 'stdover').length, 1);
+});

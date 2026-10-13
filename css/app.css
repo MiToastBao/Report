@@ -325,3 +325,18 @@ table.mv-t th:first-child { background: #eef2f9; }
 .sub-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; padding-left: 10px; border-left: 3px solid var(--line, #dfe3ea); }
 .sub-chips .chip { font-size: 12.5px; padding: 2px 10px; }
 .pill.pend { background: #fff4d6; color: #8a5a00; border-color: #f1d48a; }
+
+/* v1.0.13 Y 軸範圍（依測項） */
+.yr-box { margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.yr-box .opt-title { margin-bottom: 4px; }
+.yr-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 16px; margin-top: 8px; }
+.yr-row { display: grid; grid-template-columns: minmax(0, 1fr) 72px auto 72px 4.5em; align-items: center; gap: 6px; }
+.yr-row .yr-name { min-width: 0; overflow-wrap: anywhere; }
+.yr-row input[type=text] { width: 100%; min-width: 0; box-sizing: border-box; padding: 4px 6px; }
+.yr-row input.bad { border-color: #c62828; background: #fdecea; }
+.yr-row .yr-unit { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.yr-msg { grid-column: 1 / -1; color: #c62828; font-size: 13px; }
+
+/* v1.0.13 標準值期間重疊 */
+.std-t tr.ovl td { background: #fff4d6; }
+.ovl-note { color: #9a5b00; font-size: 12px; font-weight: 700; margin-top: 2px; }

@@ -57,12 +57,76 @@
     for (var i = 0; i < stds.length; i++) {
       var s = stds[i];
       if (s.cat !== cat || s.item !== item || !s.lines || !s.lines.length) continue;
+      if (iso && !inRange(iso, s)) continue;   // v1.0.13：先挑出這一天適用的，再決定優先順序（逐日判斷）
       if (s.st === st) a.push(s); else if (s.st === '*') b.push(s);
     }
     // v1.0.12：測站自己的標準只取代「適用月份與期間有重疊」的全部測站標準；
     // 例：測站自己設 5～9 月 38、全部測站設 10～4 月 35 → 10～4 月仍套用 35
-    var list = a.concat(b.filter(function (g) { return !a.some(function (o) { return stdOverlap(o, g); }); }));
-    return iso ? list.filter(function (s) { return inRange(iso, s); }) : list;
+    // v1.0.13：自己設定的（by: user）取代期間／月份重疊的報告帶入標準（by: auto）
+    a = userFirst(a); b = userFirst(b);
+    return a.concat(b.filter(function (g) { return !a.some(function (o) { return stdOverlap(o, g); }); }));
+  }
+  // 圖與報告表格用：這個測站測項所有可能用到的標準（實際哪一天用哪一筆，逐日用 stdsFor 判斷）
+  function stdCands(stds, cat, st, item) { return stds.filter(function (s) { return s.cat === cat && s.item === item && s.lines && s.lines.length && (s.st === st || s.st === '*'); }); }
+  function isUserStd(s) { return s.by !== 'auto'; }
+  function userFirst(list) {
+    var u = list.filter(isUserStd);
+    if (!u.length) return list;
+    return u.concat(list.filter(function (s) { return !isUserStd(s) && !u.some(function (o) { return stdOverlap(o, s); }); }));
+  }
+  /* ---------- 報告帶入的標準值：依報告期間自動分段（v1.0.13） ----------
+     obs：每份報告每張表、每個測站測項記一筆 { cat, st, item, d1, d2（這站在這張表的採樣日期範圍）, at（匯入順序）, src, vs:[{text,lines,mode,m1,m2,label,from,to}] }
+     分段：每個 d1 是一個分界點，分界點上採用「涵蓋這天、最後匯入」那份報告的標準；相鄰同值合併；
+     第一段往前不限、最後一段往後不限，中間每段到下一段第一次採樣的前一天。
+     同一天有兩份報告寫不同標準 → 用後匯入的，並回報 conflicts（列入資料異常檢查） */
+  function dayBefore(iso) { var d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); }
+  function vsSig(vs) { return JSON.stringify(vs.map(function (v) { return [v.text, v.mode || '', v.m1 || 0, v.m2 || 0, v.from || '', v.to || '']; }).sort()); }
+  function deriveStds(obs) {
+    var groups = {}, out = [], conflicts = [];
+    (obs || []).forEach(function (o, i) { if (!o.d1) return; var g = o.cat + '\u0001' + o.st + '\u0001' + o.item; (groups[g] = groups[g] || []).push({ o: o, i: i }); });
+    Object.keys(groups).forEach(function (g) {
+      var list = groups[g], seenC = {};
+      var bps = uniq(list.map(function (x) { return x.o.d1; })).sort();
+      var segs = [];
+      bps.forEach(function (b) {
+        var cov = list.filter(function (x) { return x.o.d1 <= b && b <= (x.o.d2 || x.o.d1); });
+        if (!cov.length) return;
+        var win = cov.reduce(function (p, x) { return (x.o.at || 0) > (p.o.at || 0) || ((x.o.at || 0) === (p.o.at || 0) && x.i > p.i) ? x : p; });
+        var sig = vsSig(win.o.vs || []);
+        cov.forEach(function (x) {
+          if (x === win || vsSig(x.o.vs || []) === sig || x.o.src === win.o.src) return;
+          var ck = x.o.src + '\u0001' + win.o.src + '\u0001' + vsSig(x.o.vs || []);
+          if (seenC[ck]) return; seenC[ck] = 1;
+          conflicts.push({ cat: win.o.cat, st: win.o.st, item: win.o.item, d: b, old: (x.o.vs || []).map(function (v) { return v.text; }).join('、'), oldSrc: x.o.src, now: (win.o.vs || []).map(function (v) { return v.text; }).join('、'), src: win.o.src });
+        });
+        var last = segs[segs.length - 1];
+        if (last && last.sig === sig) return;
+        segs.push({ from: b, sig: sig, o: win.o });
+      });
+      segs.forEach(function (sg, k) {
+        var from = k === 0 ? '' : sg.from, to = k === segs.length - 1 ? '' : dayBefore(segs[k + 1].from);
+        (sg.o.vs || []).forEach(function (v) {
+          var f = v.from && (!from || v.from > from) ? v.from : from, t = v.to && (!to || v.to < to) ? v.to : to;
+          if (f && t && f > t) return;
+          out.push({ cat: sg.o.cat, st: sg.o.st, item: sg.o.item, text: v.text, lines: v.lines, mode: v.mode, m1: v.m1 || 0, m2: v.m2 || 0, label: v.label || '', by: 'auto', seg: 1, from: f, to: t, src: sg.o.src, bid: sg.o.bid || '' });
+        });
+      });
+    });
+    return { stds: out, conflicts: conflicts };
+  }
+  // 自己設定的標準值（或報告帶入的舊資料）同一測站測項有兩筆期間重疊、數值不同（v1.0.13）
+  function stdOverlaps(stds) {
+    var by = {}, out = [];
+    (stds || []).forEach(function (s) { if (!s.lines || !s.lines.length) return; var g = s.cat + '\u0001' + (s.st || '*') + '\u0001' + s.item; (by[g] = by[g] || []).push(s); });
+    Object.keys(by).forEach(function (g) {
+      var a = by[g];
+      for (var i = 0; i < a.length; i++) for (var j = i + 1; j < a.length; j++) {
+        if (isUserStd(a[i]) !== isUserStd(a[j])) continue; // 自己設的取代報告帶入的，是預期的
+        if ((a[i].text || '') === (a[j].text || '') && (a[i].mode || '') === (a[j].mode || '')) continue;
+        if (stdOverlap(a[i], a[j])) out.push([a[i], a[j]]);
+      }
+    });
+    return out;
   }
   function monthSet(s) { var o = {}; for (var m = 1; m <= 12; m++) o[m] = !s.m1 || !s.m2 || (s.m1 <= s.m2 ? m >= s.m1 && m <= s.m2 : m >= s.m1 || m <= s.m2); return o; }
   function stdOverlap(x, y) {
@@ -121,18 +185,20 @@
     }
     function stdLinesOf(st, item) {
       var out = [];
-      stdsFor(stds, cat, st, item).forEach(function (s) {
-        s.lines.forEach(function (v) { out.push({ v: v, label: s.label || '標準值', text: s.text, from: s.from || '', to: s.to || '', m1: s.m1 || 0, m2: s.m2 || 0, period: s.from || s.to ? periodNote0(s) : '' }); }); // 圖上文字不寫適用月份（線的位置就代表月份）
+      stdCands(stds, cat, st, item).forEach(function (s) {
+        s.lines.forEach(function (v) { out.push({ v: v, label: s.label || '標準值', text: s.text, from: s.from || '', to: s.to || '', m1: s.m1 || 0, m2: s.m2 || 0, period: s.from || s.to ? periodNote0(s) : '', refs: [{ st: st, s: s, item: item }] }); }); // 圖上文字不寫適用月份（線的位置就代表月份）
       });
       return out;
     }
     // 標準線的範圍：只涵蓋適用期間內的採樣（i0～i1）；完全不在期間內就不畫
     // 有適用月份（季節性）時可能分成好幾段：每段一個物件，同一標準共用 grp，只有最長的那段標文字（lead）
     var grpSeq = 0;
+    // 這條線在這一天真的被採用（測站自己的優先於全部測站、自己設定的優先於報告帶入）
+    function usedOn(ln, iso) { return !ln.refs || ln.refs.some(function (rf) { return stdsFor(stds, cat, rf.st, rf.item, iso).indexOf(rf.s) >= 0; }); }
     function spanOf(ln, isos) {
       var segs = [], cur = null;
       isos.forEach(function (iso, i) {
-        var ok = iso ? inRange(iso, ln) : !!cur; // 沒有日期的分類沿用前一個
+        var ok = iso ? inRange(iso, ln) && usedOn(ln, iso) : !!cur; // 沒有日期的分類沿用前一個
         if (ok) { if (!cur) { cur = { i0: i, i1: i }; segs.push(cur); } else cur.i1 = i; } else cur = null;
       });
       if (!segs.length) return [];
@@ -171,6 +237,7 @@
             var key = ln.v + '|' + ln.from + '|' + ln.to + '|' + ln.m1 + '-' + ln.m2;
             if (!seen[key]) { seen[key] = Object.assign({}, ln, { sts: [] }); lines.push(seen[key]); }
             seen[key].sts.push(s.name);
+            if (seen[key] !== ln && ln.refs) seen[key].refs = (seen[key].refs || []).concat(ln.refs);
           });
         });
         lines.forEach(function (ln) { if (ln.sts.length < series.length && series.length > 1) ln.suffix = '（' + ln.sts.join('、') + '）'; });
@@ -232,7 +299,7 @@
         var std = {};
         var isos = rows.map(function (r) { return r.iso; });
         items.forEach(function (it) {
-          var list = stdsFor(stds, cat, st, it).filter(function (s) { return isos.some(function (iso) { return inRange(iso, s); }); });
+          var list = stdCands(stds, cat, st, it).filter(function (s) { return isos.some(function (iso) { return stdsFor(stds, cat, st, it, iso).indexOf(s) >= 0; }); });
           if (!list.length) return;
           std[it] = list.length === 1 ? (list[0].text || list[0].lines.join('~')) : list.map(function (s) { return (s.text || s.lines.join('~')) + '（' + periodNote(s) + '）'; }).join('／');
         });
@@ -376,6 +443,15 @@
         if (stdJudge(v, s)) add({ id: 'std|' + r.k + '|' + r.raw, type: 'over', level: 'info', cat: cat, k: r.k, rec: r, msg: ((s.mode === 'min') ? '低於標準值 ' : (s.mode === 'range' || (!s.mode && s.lines.length >= 2)) ? '超出標準範圍 ' : '超過標準值 ') + stdLabel(s) });
       });
     });
+    // 8. 兩份報告的標準值不同（同一期間）：採用後匯入的（v1.0.13）
+    (o.stdConflicts || []).forEach(function (c) {
+      add({ id: 'stdc|' + c.cat + '|' + c.st + '|' + c.item + '|' + c.d + '|' + c.old + '|' + c.now, type: 'stdconf', level: 'warn', cat: c.cat, st: c.st, item: c.item, msg: '測站「' + (c.st === '*' ? '全部測站' : c.st) + '」的「' + c.item + '」標準值：「' + c.oldSrc + '」寫 ' + c.old + '，「' + c.src + '」寫 ' + c.now + '（' + rocDate(c.d) + ' 起同一期間）。已採用後匯入的 ' + c.now + '；若不對，可到匯入紀錄刪除其中一份，或在「測項與標準值」修改' });
+    });
+    // 9. 標準值適用期間重疊、數值不同（v1.0.13）
+    stdOverlaps(stds).forEach(function (p) {
+      var x = p[0], y = p[1];
+      add({ id: 'stdov|' + x.k + '|' + y.k, type: 'stdover', level: 'warn', cat: x.cat, st: x.st, item: x.item, msg: '測站「' + (x.st === '*' ? '全部測站' : x.st) + '」的「' + x.item + '」有兩筆標準值 ' + stdLabel(x) + ' 與 ' + stdLabel(y) + ' 的適用期間重疊，重疊的期間不確定用哪一筆判定。請到「測項與標準值」替其中一筆填「適用期間 起／迄」' });
+    });
     // 7. 匯入時數值不同而被覆蓋
     conflicts.forEach(function (c) {
       add({ id: 'conf|' + c.k + '|' + c.old + '|' + c.raw, type: 'conflict', level: 'warn', cat: c.cat, k: c.k, rec: recs.filter(function (r) { return r.k === c.k; })[0] || null, msg: (c.oldPending ? '（原本標為「之後會補上」）' : '') + (c.how === 'merge' ? '測站「' + c.from + '」歸入「' + c.to + '」時同一天數值不同：「' + c.from + '」為「' + c.old + '」（' + (c.oldSrc || '') + '），「' + c.to + '」為「' + c.raw + '」（' + (c.src || '') + '），目前用「' + c.to + '」的值' : '兩份檔案數值不同：原本「' + c.old + '」（' + (c.oldSrc || '') + '），已改為「' + c.raw + '」（' + (c.src || '') + '）') });
@@ -383,5 +459,5 @@
     return out;
   }
 
-  return { rocDate: rocDate, rocMonth: rocMonth, rocY: rocY, quarterOf: quarterOf, inPeriod: inPeriod, stdFor: stdFor, stdsFor: stdsFor, periodNote: periodNote, monthNote: monthNote, inRange: inRange, stdJudge: stdJudge, stdLabel: stdLabel, catalog: catalog, buildCharts: buildCharts, reportTables: reportTables, anomalies: anomalies, isTextItem: isTextItem, labelOf: labelOf, nameKey: nameKey };
+  return { rocDate: rocDate, rocMonth: rocMonth, rocY: rocY, quarterOf: quarterOf, inPeriod: inPeriod, stdFor: stdFor, stdsFor: stdsFor, deriveStds: deriveStds, stdOverlaps: stdOverlaps, dayBefore: dayBefore, periodNote: periodNote, monthNote: monthNote, inRange: inRange, stdJudge: stdJudge, stdLabel: stdLabel, catalog: catalog, buildCharts: buildCharts, reportTables: reportTables, anomalies: anomalies, isTextItem: isTextItem, labelOf: labelOf, nameKey: nameKey };
 });

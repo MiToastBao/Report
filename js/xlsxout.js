@@ -183,7 +183,7 @@
         endRow++;
       }
       var chartRows = spec.kind === 'item' ? 22 : 18;
-      plan.charts.push({ xml: C.barChartXml({ spec: spec, catRef: catRef, series: series, stdSeries: stdSeries, zero: info.zero }), col: col0, row: hr - 1, cols: spec.kind === 'item' ? 12 : 10, rows: chartRows });
+      plan.charts.push({ xml: C.barChartXml({ spec: spec, catRef: catRef, series: series, stdSeries: stdSeries, zero: info.zero, yRange: info.yRange }), col: col0, row: hr - 1, cols: spec.kind === 'item' ? 12 : 10, rows: chartRows });
       r = Math.max(endRow, hr + chartRows) + 2;
     });
     ws.getColumn(1).width = 22; ws.getColumn(2).width = 22; ws.getColumn(3).width = 16; ws.getColumn(4).width = 16;
@@ -229,7 +229,7 @@
         byStation[c.station].charts.push(c);
       });
     }
-    groups.forEach(function (g) { plans.push(chartSheet(wb, nm(g.name), g, { std: o.std, zero: o.zero })); });
+    groups.forEach(function (g) { plans.push(chartSheet(wb, nm(g.name), g, { std: o.std, zero: o.zero, yRange: o.yRange })); });
     return wb.xlsx.writeBuffer().then(function (buf) { return C.inject(JSZip, buf, plans); });
   }
 
