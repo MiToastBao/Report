@@ -399,13 +399,19 @@
     var twUpd = {}, pTwin = {}; st.recs.forEach(function (r) { var pk = phaseKey(r); if (!pTwin[pk]) pTwin[pk] = Object.assign({}, r); });
     var bid = 'b' + Date.now(), prev = {}, prevStd = {}, perFile = {};
     var stdIdx = {}; st.stds.forEach(function (s) { stdIdx[s.k] = s; });
+    function addAlso(e, src) {
+      var c = twUpd[e.k]; if (!c) { var tw0 = pTwin[phaseKey(e)]; c = tw0 && tw0.k === e.k ? tw0 : Object.assign({}, e); }
+      if (c.src === src || (c.alsoSrc || []).indexOf(src) >= 0) return;
+      c.alsoSrc = (c.alsoSrc || []).concat([src]); twUpd[e.k] = c;
+    }
     pending.forEach(function (f) {
       f.datasets.forEach(function (ds) {
         if (!ds.sel) return;
         dsRecords(ds, f.name).forEach(function (r) {
           var e = idx[r.k];
-          if (e && e.raw === r.raw) return;
-          if (seen[r.k] && seen[r.k].raw === r.raw) return;
+          // 兩份報告數值完全相同：不重複存，但記下這份報告也有，刪除另一份報告的資料時不會跟著不見（v1.0.10）
+          if (e && e.raw === r.raw) { addAlso(e, r.src); return; }
+          if (seen[r.k] && seen[r.k].raw === r.raw) { var sr = seen[r.k]; if (sr.src !== r.src && (sr.alsoSrc || []).indexOf(r.src) < 0) sr.alsoSrc = (sr.alsoSrc || []).concat([r.src]); return; }
           // 同一次匯入的兩個檔案數值不同（例：月報與季報）：後面的檔為準，列入異常（v1.0.7）
           if (seen[r.k] && !e) conflicts.push({ k: r.k, cat: r.cat, old: seen[r.k].raw, oldSrc: seen[r.k].src, raw: r.raw, src: r.src, at: Date.now(), bid: bid });
           if (phaseDup(r, idx, pidx) && !seen[r.k]) {          // 同一筆，只差施工階段備註（v1.0.6）
@@ -474,7 +480,7 @@
     card.hidden = !log.length;
     if (!log.length) return;
     var bySrc = {}, byBid = {};
-    st.recs.forEach(function (r) { bySrc[r.src] = (bySrc[r.src] || 0) + 1; if (r.bid) byBid[r.bid] = (byBid[r.bid] || 0) + 1; });
+    st.recs.forEach(function (r) { bySrc[r.src] = (bySrc[r.src] || 0) + 1; (r.alsoSrc || []).forEach(function (x) { if (x !== r.src) bySrc[x] = (bySrc[x] || 0) + 1; }); if (r.bid) byBid[r.bid] = (byBid[r.bid] || 0) + 1; });
     $('logList').innerHTML = log.slice().reverse().slice(0, 60).map(function (l) {
       var li = log.indexOf(l);
       var files = uniqArr(l.files || []);
@@ -485,9 +491,16 @@
       return '<div class="log-item"><div class="log-head"><b>' + esc(fmtTime(l.at)) + '</b><span class="muted small">匯入 ' + (l.n || 0) + ' 筆' + (l.conflicts ? '（其中 ' + l.conflicts + ' 筆蓋掉舊值）' : '') + '</span><span class="spacer"></span>' + btn + '</div>' +
         '<div class="log-files">' + files.map(function (f) {
           var c = bySrc[f] || 0;
-          return '<div class="log-file"><span class="fname">' + esc(f) + '</span><span class="muted small">目前 ' + c + ' 筆</span>' + (c && !l.undone ? '<button class="btn small" data-delsrc="' + esc(f) + '">刪除這個檔案的資料</button>' : '') + '</div>';
+          // 已復原的那次不顯示筆數（同檔名後來重新匯入時，會誤顯示新匯入的筆數）（v1.0.11）
+          return '<div class="log-file"><span class="fname">' + esc(f) + '</span>' + (l.undone ? '' : '<span class="muted small">目前 ' + c + ' 筆</span>') + (c && !l.undone ? '<button class="btn small" data-delsrc="' + esc(f) + '">刪除這個檔案的資料</button>' : '') + '</div>';
         }).join('') + '</div></div>';
     }).join('');
+  }
+  // 某個檔案最近一次（未復原）的匯入；保留下來的共有資料改掛到那裡（v1.0.10）
+  function bidFor(file, exceptId) {
+    var log = st.meta.log || [];
+    for (var i = log.length - 1; i >= 0; i--) { var l = log[i]; if (l.id && !l.undone && l.id !== exceptId && (l.files || []).indexOf(file) >= 0) return l.id; }
+    return null;
   }
   function uniqArr(a) { var o = {}; return a.filter(function (x) { if (o[x]) return false; o[x] = 1; return true; }); }
   // 把資料「退回」：那筆若在匯入時蓋掉舊值，就放回舊值；否則刪除
@@ -513,14 +526,21 @@
     var u = e.target.closest('[data-undo]'), d = e.target.closest('[data-delsrc]');
     if (u) {
       var l = st.meta.log[+u.getAttribute('data-undo')]; if (!l) return;
-      var recs = st.recs.filter(function (r) { return r.bid === l.id; });
-      if (!confirm('復原 ' + fmtTime(l.at) + ' 的匯入？\n\n這次匯入的 ' + recs.length + ' 筆資料會刪除；若當時蓋掉了舊值，會把舊值放回去。這次匯入帶進來的標準值也會一併復原（自行修改過的不動）。匯入後在「資料檢視」手動改過的數值也會一起移除。')) return;
+      // 這次匯入的資料若別次匯入的其他報告也有（數值相同），保留並改掛到那份報告（v1.0.10）
+      var recs = [], keepU = [];
+      st.recs.forEach(function (r) {
+        if (r.bid !== l.id) return;
+        var rem = uniqArr([r.src].concat(r.alsoSrc || []).filter(function (f) { return f && (l.files || []).indexOf(f) < 0; }));
+        if (rem.length) { var o = Object.assign({}, r, { src: rem[0], bid: bidFor(rem[0], l.id) || r.bid }); o.alsoSrc = rem.slice(1); if (!o.alsoSrc.length) delete o.alsoSrc; keepU.push(o); }
+        else recs.push(r);
+      });
+      if (!confirm('復原 ' + fmtTime(l.at) + ' 的匯入？\n\n這次匯入的 ' + recs.length + ' 筆資料會刪除' + (keepU.length ? '（另有 ' + keepU.length + ' 筆其他報告也有同一筆，會保留）' : '') + '；若當時蓋掉了舊值，會把舊值放回去。這次匯入帶進來的標準值也會一併復原（自行修改過的不動）。匯入後在「資料檢視」手動改過的數值也會一起移除。')) return;
       var stds = st.stds.filter(function (s) { return s.bid === l.id && s.by !== 'user'; });
       // 其他資料上「這份報告也有」的註記一併拿掉（同一檔案在別次匯入還在的不動）（v1.0.7）
       var other = {}; st.meta.log.forEach(function (x) { if (x !== l && !x.undone) (x.files || []).forEach(function (f) { other[f] = 1; }); });
       var strip = (l.files || []).filter(function (f) { return !other[f]; }), alsoFix = [];
       if (strip.length) st.recs.forEach(function (r) { if (r.bid !== l.id && r.alsoSrc && r.alsoSrc.some(function (f) { return strip.indexOf(f) >= 0; })) { var o = Object.assign({}, r); o.alsoSrc = r.alsoSrc.filter(function (f) { return strip.indexOf(f) < 0; }); alsoFix.push(o); } });
-      (alsoFix.length ? S.putRecs(alsoFix) : Promise.resolve()).then(function () { return revertRecs(recs); }).then(function (res) {
+      (alsoFix.length || keepU.length ? S.putRecs(alsoFix.concat(keepU)) : Promise.resolve()).then(function () { return revertRecs(recs); }).then(function (res) {
         return S.getMeta(st.pid, 'undo|' + l.id, null).then(function (ud) {
           var ps = (ud && ud.prevStd) || {}, sPut = [], sDel = [];
           stds.forEach(function (s) { if (ps[s.k]) sPut.push(ps[s.k]); else sDel.push(s.k); });
@@ -536,7 +556,7 @@
       var keep = [];
       st.recs.forEach(function (r) {
         var also = r.alsoSrc || [];
-        if (r.src === name && also.length) { var o = Object.assign({}, r, { src: also[0] }); o.alsoSrc = also.slice(1); keep.push(o); }
+        if (r.src === name && also.length) { var o = Object.assign({}, r, { src: also[0], bid: bidFor(also[0]) || r.bid }); o.alsoSrc = also.slice(1); keep.push(o); }
         else if (also.indexOf(name) >= 0) { var o2 = Object.assign({}, r); o2.alsoSrc = also.filter(function (x) { return x !== name; }); keep.push(o2); }
       });
       var list = st.recs.filter(function (r) { return r.src === name && !(r.alsoSrc && r.alsoSrc.length); });
@@ -568,17 +588,18 @@
     $('dCat').innerHTML = opt('', '全部類別', !cat) + cats.map(function (c) { return opt(c, c, c === cat); }).join('');
     var list = st.recs.filter(function (r) { return !cat || r.cat === cat; });
     var stv = $('dSt').value, itv = $('dItem').value, pv = $('dPeriod').value, srcv = $('dSrc').value;
-    var srcs = uniqArr(st.recs.map(function (r) { return r.src || ''; })).sort();
+    var srcs = uniqArr([].concat.apply([], st.recs.map(function (r) { return [r.src || ''].concat(r.alsoSrc || []); }))).sort();
     if (srcv && srcs.indexOf(srcv) < 0) srcv = '';
     $('dSrc').innerHTML = opt('', '全部檔案', !srcv) + srcs.map(function (s) { return opt(s, s || '（未記錄）', s === srcv); }).join('');
-    if (srcv) list = list.filter(function (r) { return (r.src || '') === srcv; });
+    // 篩選某份報告：兩份報告共有的資料也列出（v1.0.11）
+    if (srcv) list = list.filter(function (r) { return (r.src || '') === srcv || (r.alsoSrc || []).indexOf(srcv) >= 0; });
     var sts = [], its = [];
     list.forEach(function (r) { if (sts.indexOf(r.st) < 0) sts.push(r.st); if (its.indexOf(r.item) < 0) its.push(r.item); });
     $('dSt').innerHTML = opt('', '全部測站', !stv) + sts.map(function (s) { return opt(s, s, s === stv); }).join('');
     $('dItem').innerHTML = opt('', '全部測項', !itv) + its.map(function (s) { return opt(s, s, s === itv); }).join('');
     $('dPeriod').innerHTML = periodOptions(pv);
     var p = periodOf(pv), q = $('dQ').value.trim();
-    list = list.filter(function (r) { return (!stv || r.st === stv) && (!itv || r.item === itv) && Co.inPeriod(r.iso, p) && (!q || (r.raw + ' ' + r.src + ' ' + r.note + ' ' + r.dl + ' ' + Co.rocDate(r.iso)).indexOf(q) >= 0); });
+    list = list.filter(function (r) { return (!stv || r.st === stv) && (!itv || r.item === itv) && Co.inPeriod(r.iso, p) && (!q || (r.raw + ' ' + r.src + ' ' + (r.alsoSrc || []).join(' ') + ' ' + r.note + ' ' + r.dl + ' ' + Co.rocDate(r.iso)).indexOf(q) >= 0); });
     list.sort(function (a, b) { return a.cat < b.cat ? -1 : a.cat > b.cat ? 1 : a.st < b.st ? -1 : a.st > b.st ? 1 : a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : a.item < b.item ? -1 : 1; });
     var per = 400, pages = Math.max(1, Math.ceil(list.length / per));
     if (dPage >= pages) dPage = 0;
@@ -587,7 +608,7 @@
     $('dCount').innerHTML = '共 ' + list.length + ' 筆' + (pages > 1 ? '・第 <select id="dPg">' + Array.apply(null, Array(pages)).map(function (x, i) { return opt(i, (i + 1) + '／' + pages, i === dPage); }).join('') + '</select> 頁' : '') + '　<span class="small">（數值可直接點一下修改，按 Enter 或移開就會儲存）</span>';
     $('dTable').innerHTML = show.length ? '<table class="t"><thead><tr><th><input type="checkbox" id="dChkAll"></th><th>類別</th><th>測站</th><th>採樣日期</th><th>備註</th><th>測項</th><th>數值</th><th>單位</th><th>來源檔案</th></tr></thead><tbody>' +
       show.map(function (r) {
-        return '<tr' + (r.excl ? ' class="excl"' : '') + '><td><input type="checkbox" data-k="' + esc(r.k) + '"></td><td>' + esc(r.cat) + '</td><td>' + esc(r.st) + '</td><td>' + esc(r.dl) + '</td><td>' + esc(r.note) + '</td><td>' + esc(r.item) + '</td><td class="num"><input class="cell" data-edit="' + esc(r.k) + '" value="' + esc(r.raw) + '"></td><td>' + esc(r.unit) + '</td><td class="small muted">' + esc(r.src || '') + '</td></tr>';
+        return '<tr' + (r.excl ? ' class="excl"' : '') + '><td><input type="checkbox" data-k="' + esc(r.k) + '"></td><td>' + esc(r.cat) + '</td><td>' + esc(r.st) + '</td><td>' + esc(r.dl) + '</td><td>' + esc(r.note) + '</td><td>' + esc(r.item) + '</td><td class="num"><input class="cell" data-edit="' + esc(r.k) + '" value="' + esc(r.raw) + '"></td><td>' + esc(r.unit) + '</td><td class="small muted">' + esc([r.src || ''].concat(r.alsoSrc || []).filter(Boolean).join('、')) + '</td></tr>';
       }).join('') + '</tbody></table>' : '<div class="empty">沒有符合條件的資料</div>';
   }
   ['dCat', 'dSt', 'dItem', 'dPeriod', 'dSrc'].forEach(function (id) { $(id).addEventListener('change', function () { if (id === 'dCat') { $('dSt').value = ''; $('dItem').value = ''; } dPage = 0; renderData(); }); });
@@ -608,16 +629,35 @@
     return S.putRecs([r]).then(function () { toast('已修改：' + r.st + ' ' + r.dl + ' ' + r.item + ' → ' + val); });
   }
   function checkedKeys(root) { return Array.prototype.map.call(root.querySelectorAll('input[data-k]:checked'), function (c) { return c.getAttribute('data-k'); }); }
+  // 篩選了來源檔案時刪除：別份報告也有的資料保留，只拿掉這份報告的來源（和匯入紀錄「刪除這個檔案的資料」相同）（v1.0.11）
+  function splitBySrc(recs, srcv) {
+    var keep = [], del = [];
+    recs.forEach(function (r) {
+      var rem = srcv ? uniqArr([r.src].concat(r.alsoSrc || []).filter(function (f) { return f && f !== srcv; })) : [];
+      if (rem.length) { var o = Object.assign({}, r, { src: rem[0] }); if (r.src === srcv) o.bid = bidFor(rem[0]) || r.bid; o.alsoSrc = rem.slice(1); if (!o.alsoSrc.length) delete o.alsoSrc; keep.push(o); }
+      else del.push(r.k);
+    });
+    return { keep: keep, del: del };
+  }
+  function delWithSrc(recs, head, done) {
+    var srcv = $('dSrc').value, sp = splitBySrc(recs, srcv);
+    var msg = (sp.del.length ? head + sp.del.length + ' 筆資料' + (head.indexOf('篩選') >= 0 ? '（不只這一頁）' : '') + '？無法復原。' +
+      (sp.keep.length ? '\n\n另有 ' + sp.keep.length + ' 筆其他報告也有同一筆，會保留，只拿掉「' + srcv + '」的來源。' : '')
+      : '這 ' + sp.keep.length + ' 筆資料其他報告也有，不會刪除，只拿掉「' + srcv + '」的來源。要繼續嗎？') +
+      (head.indexOf('篩選') >= 0 ? '\n\n若只是某次匯入錯了，建議改用「匯入報告」頁下方的「匯入紀錄」復原，會把被蓋掉的舊值放回去。' : '');
+    if (!confirm(msg)) return;
+    (sp.keep.length ? S.putRecs(sp.keep) : Promise.resolve()).then(function () { return sp.del.length ? S.delRecs(sp.del) : null; })
+      .then(function () { return loadProject(st.pid); }).then(function () { renderData(); if (done) toast('已刪除 ' + sp.del.length + ' 筆' + (sp.keep.length ? '、保留其他報告也有的 ' + sp.keep.length + ' 筆' : '')); });
+  }
   $('dDel').addEventListener('click', function () {
     var ks = checkedKeys($('dTable')); if (!ks.length) { toast('請先勾選要刪除的資料', true); return; }
-    if (!confirm('刪除勾選的 ' + ks.length + ' 筆資料？無法復原。')) return;
-    S.delRecs(ks).then(function () { return loadProject(st.pid); }).then(renderData);
+    var set = {}; ks.forEach(function (k) { set[k] = 1; });
+    delWithSrc(st.recs.filter(function (r) { return set[r.k]; }), '刪除勾選的 ', false);
   });
   $('dDelAll').addEventListener('click', function () {
-    var ks = dFiltered.map(function (r) { return r.k; }); if (!ks.length) { toast('目前篩選沒有資料', true); return; }
-    var all = ks.length === st.recs.length;
-    if (!confirm((all ? '目前沒有篩選，這會刪除這個計畫的全部 ' : '刪除目前篩選出的全部 ') + ks.length + ' 筆資料（不只這一頁）？無法復原。\n\n若只是某次匯入錯了，建議改用「匯入報告」頁下方的「匯入紀錄」復原，會把被蓋掉的舊值放回去。')) return;
-    S.delRecs(ks).then(function () { return loadProject(st.pid); }).then(function () { renderData(); toast('已刪除 ' + ks.length + ' 筆'); });
+    if (!dFiltered.length) { toast('目前篩選沒有資料', true); return; }
+    var all = ['dCat', 'dSt', 'dItem', 'dPeriod', 'dSrc', 'dQ'].every(function (id) { return !$(id).value.trim(); });
+    delWithSrc(dFiltered, all ? '目前沒有篩選，這會刪除這個計畫的全部 ' : '刪除目前篩選出的全部 ', true);
   });
   function setExcl(ks, v) {
     var set = {}; ks.forEach(function (k) { set[k] = 1; });
