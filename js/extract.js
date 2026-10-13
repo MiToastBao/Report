@@ -77,8 +77,10 @@
   }
   function isValueLike(s) { var k = parseVal(s).kind; return k === 'num' || k === 'nd' || k === 'lt' || k === 'gt'; }
   function isBlank(s) { return parseVal(s).kind === 'blank'; }
+  // 標準值後面的註腳記號（「35/38註2」「30 (註1)」「100註 3」）不是數值，判讀前先去掉（v1.0.12）
+  function stripNote(s) { return String(s || '').replace(/[(（]\s*註\s*[\d一二三四五六七八九十]*\s*[)）]|註\s*[\d一二三四五六七八九十]+/g, ' ').replace(/\s+/g, ' ').trim(); }
   function stdLines(text) {
-    var s = norm(text);
+    var s = stripNote(norm(text));
     if (!s || RE_BLANK.test(s.replace(/\s/g, ''))) return [];
     var out = [];
     var re = /\d*\.?\d+/g, m;
@@ -95,7 +97,7 @@
 
   // 判定方式：max＝上限（不可超過，預設）、min＝下限（不可低於，例如溶氧 2 以上）、range＝範圍（例如 pH 6~9）
   function stdMode(text, item) {
-    var s = norm(text), n = stdLines(s).length;
+    var s = stripNote(norm(text)), n = stdLines(s).length;
     // v1.0.6：「>2.0」「＞5.5」（溶氧量的寫法）也是下限；以前沒認，溶氧 4.7 被當成超過上限 2
     if (/以上|≧|≥|>=|不得低於|不低於|大於/.test(s) || /^\s*[>＞]/.test(s)) return 'min';
     if (/\d\s*(?:[~～至]|[-－–]\s*\d)/.test(s) || /範圍|之間/.test(s)) return 'range';
@@ -106,7 +108,7 @@
   // 季節性標準：放流水水溫「38/35」＝5～9 月 38℃、10 月～翌年 4 月 35℃（放流水標準的寫法）
   // 回傳多筆 {text, lines, m1, m2}；不是季節性的就回傳 null
   function stdSeason(text, item) {
-    var s = norm(text), m = /^\s*(\d+(?:\.\d+)?)\s*[\/／]\s*(\d+(?:\.\d+)?)\s*(?:℃|°C|度)?\s*$/.exec(s);
+    var s = stripNote(norm(text)), m = /^\s*(\d+(?:\.\d+)?)\s*[\/／]\s*(\d+(?:\.\d+)?)\s*(?:℃|°C|度)?\s*$/.exec(s);
     if (!m || !/水溫/.test(item || '')) return null;
     var a = +m[1], b = +m[2], hi = Math.max(a, b), lo = Math.min(a, b);
     if (hi === lo) return null;
@@ -851,7 +853,7 @@
   }
 
   return {
-    norm: norm, parseDate: parseDate, isDateCell: isDateCell, parseVal: parseVal, isValueLike: isValueLike, stdLines: stdLines, stdMode: stdMode, stdSeason: stdSeason,
+    norm: norm, parseDate: parseDate, isDateCell: isDateCell, parseVal: parseVal, isValueLike: isValueLike, stdLines: stdLines, stripNote: stripNote, stdMode: stdMode, stdSeason: stdSeason,
     splitUnit: splitUnit, cleanItem: cleanItem, stdPeriod: stdPeriod, captionStation: captionStation, guessCat: guessCat, CATS: CATS,
     extractTable: extractTable, extractAll: extractAll, DBG: DBG
   };

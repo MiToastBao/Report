@@ -65,6 +65,8 @@
   function parseDocxXml(xml) {
     var re = /<(\/?)([A-Za-z0-9_]+:[A-Za-z0-9_]+|[A-Za-z0-9_]+)([^>]*?)(\/?)>|([^<]+)/g;
     var m, tables = [], paras = [], stack = []; // stack of table contexts
+    // 浮動表格（w:tblpPr）：檔案裡表格寫在標題段落前面，畫面上才定位到標題下方（v1.0.12）
+    var afterTb = null, RE_CAP_P = /^表\s*[\dA-Za-z一二三四五六七八九十]/;
     var skip = 0; // 在 txbxContent / Fallback / delText 內
     var skipTags = { 'w:txbxContent': 1, 'mc:Fallback': 1, 'w:delText': 1, 'w:instrText': 1 };
     var para = null; // 目前段落文字（表格外）
@@ -119,13 +121,19 @@
           } else if (!close && !selfc) para = '';
           else if (close) {
             var t = cleanCell(para || '');
-            if (t) { paras.push(t); if (paras.length > 6) paras.shift(); }
+            if (t) {
+              // 浮動表格前面找到的標題是上一張表的（或根本不是「表 x-x」），而緊接在後的第一段是「表 x-x」：用後面這段
+              if (afterTb && afterTb.floating && RE_CAP_P.test(t) && (!RE_CAP_P.test(afterTb.caption || '') || afterTb.caption === afterTb.prevCap)) afterTb.caption = t;
+              afterTb = null;
+              paras.push(t); if (paras.length > 6) paras.shift();
+            }
             para = null;
           }
           break;
         case 'w:tbl':
           if (!close) {
             var outer = stack[stack.length - 1];
+            if (!outer) afterTb = null;
             stack.push({ rows: [], row: null, cell: null, caption: captionOf(paras), ctx: paras.slice(-3), parentCell: outer ? outer.cell : null });
           } else {
             var tb = stack.pop();
@@ -133,8 +141,11 @@
               // 巢狀表格：內容併回外層格子
               var pc = curCell();
               if (pc) pc.text += ' ' + tb.rows.map(function (r) { return r.map(function (c) { return c.text; }).join(' '); }).join(' ');
-            } else tables.push(tb);
+            } else { tb.prevCap = tables.length ? tables[tables.length - 1].caption : ''; tables.push(tb); afterTb = tb; }
           }
+          break;
+        case 'w:tblpPr':
+          if (stack.length && !close && !stack[stack.length - 1].rows.length) stack[stack.length - 1].floating = true;
           break;
         case 'w:tr':
           if (!stack.length) break;

@@ -59,8 +59,18 @@
       if (s.cat !== cat || s.item !== item || !s.lines || !s.lines.length) continue;
       if (s.st === st) a.push(s); else if (s.st === '*') b.push(s);
     }
-    var list = a.length ? a : b;
+    // v1.0.12：測站自己的標準只取代「適用月份與期間有重疊」的全部測站標準；
+    // 例：測站自己設 5～9 月 38、全部測站設 10～4 月 35 → 10～4 月仍套用 35
+    var list = a.concat(b.filter(function (g) { return !a.some(function (o) { return stdOverlap(o, g); }); }));
     return iso ? list.filter(function (s) { return inRange(iso, s); }) : list;
+  }
+  function monthSet(s) { var o = {}; for (var m = 1; m <= 12; m++) o[m] = !s.m1 || !s.m2 || (s.m1 <= s.m2 ? m >= s.m1 && m <= s.m2 : m >= s.m1 || m <= s.m2); return o; }
+  function stdOverlap(x, y) {
+    var mx = monthSet(x), my = monthSet(y), mo = false;
+    for (var m = 1; m <= 12; m++) if (mx[m] && my[m]) { mo = true; break; }
+    if (!mo) return false;
+    var x1 = x.from || '', x2 = x.to || '\uffff', y1 = y.from || '', y2 = y.to || '\uffff';
+    return x1 <= y2 && y1 <= x2;
   }
   function stdFor(stds, cat, st, item, iso) { return stdsFor(stds, cat, st, item, iso)[0] || null; }
   function periodNote(s) {

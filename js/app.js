@@ -78,10 +78,14 @@
           return;
         }
       }
+      // v1.0.12：報告帶入、有註腳記號的標準值（「30註3」以前被讀成 30、3）重新判讀數值
+      var lnFix = false;
+      if (s.by === 'auto' && /註/.test(s.text || '')) { var nl = X.stdLines(s.text); if (nl.length && nl.join(',') !== (s.lines || []).join(',')) { s.lines = nl; lnFix = true; } }
       var md = X.stdMode(s.text || '', s.item);
       // v1.0.6：報告帶入的「>2.0」以前被判成上限（已經標過 modeFixed 的也要再修一次）
       var gtFix = s.by === 'auto' && md === 'min' && s.mode === 'max' && /^\s*[>＞]/.test(s.text || '') && s.modeFixed !== 2;
       if (!s.mode || gtFix || (s.by === 'auto' && s.mode !== md && !s.modeFixed)) { s.mode = md; s.modeFixed = gtFix ? 2 : 1; put.push(s); }
+      else if (lnFix) put.push(s);
     });
     if (!put.length && !del.length) return Promise.resolve();
     return S.putStds(put, del).then(function () { return S.stds(st.pid); }).then(function (a) { st.stds = a; });

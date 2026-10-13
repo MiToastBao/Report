@@ -413,3 +413,33 @@ test('#19 「備註」欄不是監測項目，不匯入', () => {
   assert.ok(!ds.recs.some(r => r.item === '備註'), ds.recs.map(r => r.item).join(','));
   assert.equal(ds.recs.length, 6);
 });
+
+test('#28 浮動表格：標題段落寫在表格後面時，改用後面的「表 x-x」', () => {
+  const P = t => '<w:p><w:r><w:t>' + t + '</w:t></w:r></w:p>';
+  const T = (fl, c) => '<w:tbl><w:tblPr>' + (fl ? '<w:tblpPr w:vertAnchor="text" w:tblpY="500"/>' : '') + '</w:tblPr><w:tr><w:tc>' + P(c) + '</w:tc></w:tr></w:tbl>';
+  const xml = '<w:document><w:body>' +
+    P('表9-1 甲站噪音監測結果') + T(false, 'a') +            // 一般表格，標題在前
+    P('說明文字') + T(true, 'b') + P('表9-2 乙站噪音監測結果') + // 浮動表格，標題在後
+    P('表9-3 丙河川水質監測結果') + T(true, 'c') + P('表9-4 丁河川水質監測結果') + T(true, 'd') + // 浮動、標題在前（後面那段是下一張的）
+    '</w:body></w:document>';
+  const tabs = D.parseDocxXml(xml);
+  assert.deepEqual(tabs.map(t => t.caption), ['表9-1 甲站噪音監測結果', '表9-2 乙站噪音監測結果', '表9-3 丙河川水質監測結果', '表9-4 丁河川水質監測結果']);
+});
+
+test('#29 標準值的註腳記號不當成數值', () => {
+  assert.deepEqual(X.stdSeason('35/38註2', '水溫').map(v => [v.lines[0], v.m1, v.m2]), [[38, 5, 9], [35, 10, 4]]);
+  assert.deepEqual(X.stdSeason('38/35 (註1)', '水溫').map(v => v.lines[0]), [38, 35]);
+  assert.deepEqual(X.stdLines('30註3'), [30]);
+  assert.deepEqual(X.stdLines('6.0~9.0註1'), [6, 9]);
+  assert.equal(X.stdMode('6.0~9.0註1', 'pH'), 'range');
+  assert.deepEqual(X.stdLines('100'), [100]);
+});
+
+test('#32 測站自己的季節性標準只取代重疊月份的全部測站標準', () => {
+  const S = [{ cat: '放', st: '甲站', item: '水溫', lines: [38], m1: 5, m2: 9, text: '38' }, { cat: '放', st: '*', item: '水溫', lines: [35], m1: 10, m2: 4, text: '35' },
+    { cat: '放', st: '甲站', item: '懸浮固體', lines: [30], text: '30' }, { cat: '放', st: '*', item: '懸浮固體', lines: [50], text: '50' }];
+  assert.deepEqual(Co.stdsFor(S, '放', '甲站', '水溫', '2026-02-13').map(s => s.text), ['35']);
+  assert.deepEqual(Co.stdsFor(S, '放', '甲站', '水溫', '2025-07-08').map(s => s.text), ['38']);
+  assert.deepEqual(Co.stdsFor(S, '放', '甲站', '懸浮固體').map(s => s.text), ['30'], '全年都重疊：仍只用測站自己的');
+  assert.deepEqual(Co.stdsFor(S, '放', '乙站', '水溫').map(s => s.text), ['35']);
+});
