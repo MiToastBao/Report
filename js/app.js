@@ -1209,7 +1209,9 @@
     if (formInitPid !== st.pid) {
       formInitPid = st.pid;
       if (f.mode) setRadio('gMode', f.mode); if (f.x) setRadio('gX', f.x); if (f.split) setRadio('gSplit', f.split);
-      ['gStd', 'gZero', 'gND', 'gLT', 'gNA', 'gPH', 'gStTitle', 'gStdAxis'].forEach(function (id) { if (f[id] != null) $(id).checked = f[id]; });
+      ['gStd', 'gZero', 'gND', 'gLT', 'gNA', 'gPH', 'gStTitle', 'gStdAxis', 'gGridTitle'].forEach(function (id) { if (f[id] != null) $(id).checked = f[id]; });
+      if (f.grid) $('gGrid').value = f.grid; if (f.gridC) $('gGridC').value = f.gridC; if (f.gridR) $('gGridR').value = f.gridR;
+      syncGridOpt();
       if (f.gLT == null && f.gND != null) $('gLT').checked = f.gND;   // v1.0.8 以前「ND／<x」是同一個勾選
     }
     var qs = {}; recsCat.forEach(function (r) { qs[Co.quarterOf(r.iso)] = 1; });
@@ -1253,12 +1255,46 @@
   Array.prototype.forEach.call(document.querySelectorAll('input[name=gMode]'), function (r) { r.addEventListener('change', updatePlan); });
   // 各站並列時，各站採樣日不一定同一天，預設改用「年月」當 X 軸
   Array.prototype.forEach.call(document.querySelectorAll('input[name=gMode]'), function (r) {
-    r.addEventListener('change', function () { if (this.value === 'item' && radio('gX') === 'orig') setRadio('gX', 'month'); saveForm(); });
+    r.addEventListener('change', function () { if (baseMode(this.value) === 'item' && radio('gX') === 'orig') setRadio('gX', 'month'); syncGridOpt(); saveForm(); });
   });
+  /* v1.0.15（#39、#40）拼成大圖：stationGrid＝第 1 種拼成「一個測站一張」；itemGrid＝第 2 種拼成一張 */
+  function isGrid(m) { return m === 'stationGrid' || m === 'itemGrid'; }
+  function baseMode(m) { return m === 'stationGrid' ? 'station' : m === 'itemGrid' ? 'item' : m; }
+  function gridDims() {
+    var v = $('gGrid').value, c, r;
+    if (v === 'custom') { c = Math.round(+$('gGridC').value); r = Math.round(+$('gGridR').value); }
+    else { c = +v.split('x')[0]; r = +v.split('x')[1]; }
+    c = Math.min(6, Math.max(1, c || 2)); r = Math.min(8, Math.max(1, r || 1));
+    return { cols: c, rows: r };
+  }
+  function syncGridOpt() {
+    $('gGridOpt').hidden = !isGrid(radio('gMode'));
+    $('gGridCustom').hidden = $('gGrid').value !== 'custom';
+  }
+  ['gGrid', 'gGridC', 'gGridR'].forEach(function (id) {
+    $(id).addEventListener('change', function () {
+      if (id !== 'gGrid') { var mx = id === 'gGridC' ? 6 : 8, n = Math.round(+this.value); if (!(n >= 1)) n = 1; if (n > mx) { n = mx; toast((id === 'gGridC' ? '欄數' : '列數') + '最多 ' + mx, true); } this.value = n; }
+      syncGridOpt(); saveForm(); updatePlan();
+      if (lastCharts && lastChartOpts && isGrid(lastChartOpts.mode)) $('gGo').click();
+    });
+  });
+  $('gGridTitle').addEventListener('change', function () { saveForm(); redrawCharts(); });
+  // v1.0.15（#41）：圖的畫法勾選一改就重畫（以前要再按「產生趨勢圖」，而且下載的高解析圖會照新勾選、和畫面上不一樣）
+  ['gStd', 'gStdAxis', 'gZero', 'gND', 'gLT', 'gNA', 'gPH', 'gStTitle'].forEach(function (id) { $(id).addEventListener('change', function () { saveForm(); redrawCharts(); }); });
+  var lastGrids = null;
+  function gridTitle(g) {
+    var cat = lastChartOpts.cat, pg = g.pages > 1 ? '（' + g.page + '/' + g.pages + '）' : '';
+    return cat + '趨勢圖-' + (lastChartOpts.mode === 'stationGrid' ? g.key : '各測站比較') + pg;
+  }
+  function gridOpts(scale, g) {
+    var d = gridDims();
+    return Object.assign(drawOpts(scale), { cols: d.cols, rows: d.rows, title: $('gGridTitle').checked ? gridTitle(g) : '' });
+  }
+  function drawGrid(cv, g, scale) { return CH.compose(cv, g.idx.map(function (i) { return lastCharts[i]; }), gridOpts(scale, g)); }
   function checkedVals(id) { return Array.prototype.map.call($(id).querySelectorAll('input:checked'), function (c) { return c.value; }); }
   function saveForm() {
     if (!st.pid) return;
-    st.meta.chartForm = { cat: $('gCat').value, fromY: +$('gFromY').value, fromM: +$('gFromM').value, toY: +$('gToY').value, toM: +$('gToM').value, mode: radio('gMode'), x: radio('gX'), split: radio('gSplit'), sts: checkedVals('gSts'), items: checkedVals('gItems'), gStd: $('gStd').checked, gZero: $('gZero').checked, gND: $('gND').checked, gLT: $('gLT').checked, gNA: $('gNA').checked, gPH: $('gPH').checked, gStTitle: $('gStTitle').checked, gStdAxis: $('gStdAxis').checked };
+    st.meta.chartForm = { cat: $('gCat').value, fromY: +$('gFromY').value, fromM: +$('gFromM').value, toY: +$('gToY').value, toM: +$('gToM').value, mode: radio('gMode'), x: radio('gX'), split: radio('gSplit'), sts: checkedVals('gSts'), items: checkedVals('gItems'), gStd: $('gStd').checked, gZero: $('gZero').checked, gND: $('gND').checked, gLT: $('gLT').checked, gNA: $('gNA').checked, gPH: $('gPH').checked, gStTitle: $('gStTitle').checked, gStdAxis: $('gStdAxis').checked, grid: $('gGrid').value, gridC: +$('gGridC').value, gridR: +$('gGridR').value, gGridTitle: $('gGridTitle').checked };
     saveMeta();
   }
   function drawOpts(scale) { return { scale: scale, std: $('gStd').checked, stdAxis: $('gStdAxis').checked, zero: $('gZero').checked, marks: { nd: $('gND').checked, lt: $('gLT').checked, na: $('gNA').checked, ph: $('gPH').checked }, stationInTitle: $('gStTitle').checked, yRange: yrOf((lastChartOpts && lastChartOpts.cat) || $('gCat').value) }; }
@@ -1270,12 +1306,26 @@
     if (!sts.length || !items.length) return toast('請至少勾選一個測站與一個測項', true);
     var cg = Co.catalog(st.recs, cat, periodSel());
     var chartItems = items.filter(function (i) { return !cg.textItems[i]; });
-    var o = { cat: cat, period: periodSel(), stations: sts, items: chartItems, mode: radio('gMode'), xmode: radio('gX'), noteInLabel: 'auto' };
+    var mode = radio('gMode');
+    var o = { cat: cat, period: periodSel(), stations: sts, items: chartItems, mode: baseMode(mode), xmode: radio('gX'), noteInLabel: 'auto' };
     var charts = Co.buildCharts(st.recs, st.stds, o);
-    lastCharts = charts; lastChartOpts = Object.assign({}, o, { tableItems: items });
+    lastCharts = charts; lastChartOpts = Object.assign({}, o, { tableItems: items, mode: mode });
+    lastGrids = null;
     var out = $('gOut');
     figOff = {};
     if (!charts.length) { $('gFilter').hidden = true; out.innerHTML = '<div class="card empty">這個期間、測站與測項沒有可以畫的資料</div>'; $('gXlsx').disabled = true; $('gPngAll').disabled = true; return; }
+    if (isGrid(mode)) {
+      var d = gridDims();
+      lastGrids = CH.gridPages(charts, d.cols, d.rows, mode === 'stationGrid' ? function (c) { return c.station; } : null);
+      out.innerHTML = lastGrids.map(function (g, i) {
+        return '<div class="fig grid-fig" data-fi="' + i + '"><div class="fig-head"><label class="chk fig-pick" title="取消勾選：下載全部圖檔與 Excel 時不包含這張"><input type="checkbox" data-fpick="' + i + '" checked> </label><span class="t">' + esc(gridTitle(g)) + '</span><button class="btn small" data-png="' + i + '">下載高解析圖</button></div><canvas data-gi="' + i + '"></canvas>' +
+          '<div class="note">' + g.idx.length + ' 張圖拼成 ' + d.cols + ' 欄 × ' + d.rows + ' 列' + (g.idx.length < d.cols * d.rows ? '（' + (d.cols * d.rows - g.idx.length) + ' 格留白）' : '') + '</div></div>';
+      }).join('');
+      Array.prototype.forEach.call(out.querySelectorAll('canvas'), function (cv) { drawGrid(cv, lastGrids[+cv.getAttribute('data-gi')], Math.min(2, window.devicePixelRatio || 1)); });
+      $('gXlsx').disabled = false; $('gPngAll').disabled = false;
+      renderFigFilter();
+      return;
+    }
     out.innerHTML = charts.map(function (c, i) {
       var nd = 0; c.series.forEach(function (s) { s.values.forEach(function (v) { if (v && v.num == null) nd++; }); });
       var title = (c.kind === 'station' ? c.station + '｜' : '') + c.title;
@@ -1290,7 +1340,10 @@
   /* 產生後的篩選：依測站、測項顯示／隱藏；每張圖可取消勾選。下載全部圖檔與 Excel 圖表只包含「顯示中且勾選」的圖 */
   /* 產生後的篩選列：直接切換要畫的測站、測項與圖的樣式（等於改上面的勾選並重畫）；每張圖左上角可取消勾選，下載全部圖檔與 Excel 圖表時不含 */
   var figOff = {};
-  function pickedCharts() { return (lastCharts || []).filter(function (c, i) { return !figOff[i]; }); }
+  function pickedCharts() {
+    if (lastGrids) { var a = []; lastGrids.forEach(function (g, gi) { if (!figOff[gi]) g.idx.forEach(function (i) { a.push(lastCharts[i]); }); }); return a; }
+    return (lastCharts || []).filter(function (c, i) { return !figOff[i]; });
+  }
   function boxVals(id) { return Array.prototype.map.call($(id).querySelectorAll('input[type=checkbox]'), function (c) { return { v: c.value, on: c.checked, text: c.closest('label') && /（文字）/.test(c.closest('label').textContent) }; }); }
   function renderFigFilter() {
     var cs = lastCharts || [], md = lastChartOpts && lastChartOpts.mode;
@@ -1298,7 +1351,7 @@
     var chip = function (kind, o) { return '<button type="button" class="fchip' + (o.on ? ' on' : '') + '" data-fk="' + kind + '" data-fv="' + esc(o.v) + '">' + esc(o.v) + '</button>'; };
     var sts = boxVals('gSts'), its = boxVals('gItems').filter(function (o) { return !o.text; });
     el.innerHTML = '<div class="ff-title">只看部分的圖：點一下切換，圖會立刻重畫（和上面的勾選同步）</div>' +
-      '<div class="ff-row"><span class="ff-lab">圖的樣式</span><span class="seg"><button type="button" data-fmode="station" class="' + (md === 'station' ? 'on' : '') + '">每個測站、每個測項各一張</button><button type="button" data-fmode="item" class="' + (md === 'item' ? 'on' : '') + '">每個測項一張，各測站並列</button></span></div>' +
+      '<div class="ff-row"><span class="ff-lab">圖的樣式</span><span class="seg"><button type="button" data-fmode="station" class="' + (md === 'station' ? 'on' : '') + '">每個測站、每個測項各一張</button><button type="button" data-fmode="item" class="' + (md === 'item' ? 'on' : '') + '">每個測項一張，各測站並列</button><button type="button" data-fmode="stationGrid" class="' + (md === 'stationGrid' ? 'on' : '') + '">拼成大圖：一個測站一張</button><button type="button" data-fmode="itemGrid" class="' + (md === 'itemGrid' ? 'on' : '') + '">拼成大圖：各測項並列圖</button></span></div>' +
       '<div class="ff-row"><span class="ff-lab">測站</span>' + (sts.length > 1 ? '<button type="button" class="mini-btn" data-fall="gSts">全選</button><button type="button" class="mini-btn" data-fonly="gSts">只選一個…</button>' : '') + sts.map(function (o) { return chip('gSts', o); }).join('') + '</div>' +
       '<div class="ff-row"><span class="ff-lab">測項</span>' + (its.length > 1 ? '<button type="button" class="mini-btn" data-fall="gItems">全選</button><button type="button" class="mini-btn" data-fonly="gItems">只選一個…</button>' : '') + its.map(function (o) { return chip('gItems', o); }).join('') + '</div>' +
       '<div class="ff-sum" id="gFSum"></div>';
@@ -1308,6 +1361,13 @@
   function applyFigFilter() {
     var cs = lastCharts || [];
     Array.prototype.forEach.call($('gOut').querySelectorAll('.fig[data-fi]'), function (f) { f.classList.toggle('off', !!figOff[+f.getAttribute('data-fi')]); });
+    if (lastGrids) {
+      var ng = lastGrids.filter(function (g, gi) { return !figOff[gi]; }).length, nc = pickedCharts().length;
+      if ($('gFSum')) $('gFSum').innerHTML = (fOnly ? '<b class="warn-text">請點一個' + (fOnly === 'gSts' ? '測站' : '測項') + '，只畫它</b>　' : '') + '共 <b>' + lastGrids.length + '</b> 張大圖；下載全部圖檔會包含 <b>' + ng + '</b> 張大圖，Excel 會包含其中的 <b>' + nc + '</b> 張單張圖表（大圖左上角有勾選的）。';
+      $('gPngAll').disabled = !ng; $('gXlsx').disabled = !ng;
+      $('gMsg').textContent = '共 ' + lastGrids.length + ' 張大圖' + (ng < lastGrids.length ? '，已選 ' + ng + ' 張' : '');
+      return;
+    }
     var n = pickedCharts().length;
     if ($('gFSum')) $('gFSum').innerHTML = (fOnly ? '<b class="warn-text">請點一個' + (fOnly === 'gSts' ? '測站' : '測項') + '，只畫它</b>　' : '') + '共 <b>' + cs.length + '</b> 張圖；下載全部圖檔與 Excel 會包含 <b>' + n + '</b> 張（圖左上角有勾選的）。';
     $('gPngAll').disabled = !n; $('gXlsx').disabled = !n;
@@ -1318,7 +1378,7 @@
   }
   $('gFilter').addEventListener('click', function (e) {
     var mb = e.target.closest('[data-fmode]');
-    if (mb) { if (mb.classList.contains('on')) return; setRadio('gMode', mb.getAttribute('data-fmode')); updatePlan(); $('gGo').click(); return; }
+    if (mb) { if (mb.classList.contains('on')) return; setRadio('gMode', mb.getAttribute('data-fmode')); syncGridOpt(); updatePlan(); $('gGo').click(); return; }
     var b = e.target.closest('[data-fk],[data-fall],[data-fonly]'); if (!b) return;
     if (b.hasAttribute('data-fonly')) { fOnly = fOnly === b.getAttribute('data-fonly') ? null : b.getAttribute('data-fonly'); applyFigFilter(); return; }
     if (b.hasAttribute('data-fall')) { setBox(b.getAttribute('data-fall'), null, true); fOnly = null; }
@@ -1368,13 +1428,26 @@
   // 已經產生的圖依新設定重畫（不必再按一次「產生趨勢圖」）
   function redrawCharts() {
     if (!lastCharts || !lastCharts.length) return;
-    Array.prototype.forEach.call($('gOut').querySelectorAll('canvas'), function (cv) { var c = lastCharts[+cv.getAttribute('data-i')]; if (c) CH.draw(cv, c, drawOpts(Math.min(2, window.devicePixelRatio || 1))); });
+    Array.prototype.forEach.call($('gOut').querySelectorAll('canvas'), function (cv) {
+      if (cv.hasAttribute('data-gi')) { var g = lastGrids && lastGrids[+cv.getAttribute('data-gi')]; if (g) drawGrid(cv, g, Math.min(2, window.devicePixelRatio || 1)); return; }
+      var c = lastCharts[+cv.getAttribute('data-i')]; if (c) CH.draw(cv, c, drawOpts(Math.min(2, window.devicePixelRatio || 1)));
+    });
+    if (lastGrids) Array.prototype.forEach.call($('gOut').querySelectorAll('.grid-fig .t'), function (t, i) { if (lastGrids[i]) t.textContent = gridTitle(lastGrids[i]); });
   }
   function updatePlan() {
     renderYr();
     var ns = checkedVals('gSts').length, ni = checkedVals('gItems').length;
-    $('gPlan').textContent = ns && ni ? '目前勾選 ' + ns + ' 個測站、' + ni + ' 個測項' + (radio('gMode') === 'item' ? '，最多 ' + ni + ' 張圖' : '，最多 ' + ns * ni + ' 張圖') : '還沒有勾選測站或測項';
+    $('gPlan').textContent = ns && ni ? '目前勾選 ' + ns + ' 個測站、' + ni + ' 個測項' + planText(ns, ni) : '還沒有勾選測站或測項';
   }
+  function planText(ns, ni) {
+    var m = radio('gMode');
+    if (!isGrid(m)) return m === 'item' ? '，最多 ' + ni + ' 張圖' : '，最多 ' + ns * ni + ' 張圖';
+    var d = gridDims(), per = d.cols * d.rows, pg = Math.ceil(ni / per);
+    return m === 'stationGrid' ? '，最多 ' + ns + ' 個測站 × ' + pg + ' 張大圖（每張 ' + d.cols + '×' + d.rows + '＝' + per + ' 格）'
+      : '，最多 ' + pg + ' 張大圖（每張 ' + d.cols + '×' + d.rows + '＝' + per + ' 格）';
+  }
+  function gridPngName(g) { return safeName((lastChartOpts.mode === 'stationGrid' ? g.key + '_' : '') + '趨勢圖拼圖' + (lastChartOpts.mode === 'itemGrid' ? '_各測站比較' : '') + (g.pages > 1 ? '_' + g.page : '')) + '.png'; }
+  function gridPngBlob(g) { var cv = document.createElement('canvas'); drawGrid(cv, g, 3); return new Promise(function (res) { cv.toBlob(res, 'image/png'); }); }
   function pngName(c) { return safeName((c.kind === 'station' ? c.station + '_' : '') + c.title) + '.png'; }
   function pngBlob(c) {
     var cv = document.createElement('canvas');
@@ -1383,6 +1456,7 @@
   }
   $('gOut').addEventListener('click', function (e) {
     var b = e.target.closest('[data-png]'); if (!b) return;
+    if (lastGrids) { var g = lastGrids[+b.getAttribute('data-png')]; gridPngBlob(g).then(function (bl) { download(gridPngName(g), bl); }); return; }
     var c = lastCharts[+b.getAttribute('data-png')];
     pngBlob(c).then(function (bl) { download(pngName(c), bl); });
   });
@@ -1391,15 +1465,15 @@
     var zip = new window.JSZip(), names = {};
     $('gMsg').textContent = '產生圖檔中…';
     var chain = Promise.resolve();
-    var pk = pickedCharts();
+    var pk = lastGrids ? lastGrids.filter(function (g, gi) { return !figOff[gi]; }) : pickedCharts();
     pk.forEach(function (c) {
-      chain = chain.then(function () { return pngBlob(c); }).then(function (bl) {
-        var n = pngName(c); if (names[n]) { names[n]++; n = n.replace(/\.png$/, '_' + names[n] + '.png'); } else names[n] = 1;
+      chain = chain.then(function () { return lastGrids ? gridPngBlob(c) : pngBlob(c); }).then(function (bl) {
+        var n = lastGrids ? gridPngName(c) : pngName(c); if (names[n]) { names[n]++; n = n.replace(/\.png$/, '_' + names[n] + '.png'); } else names[n] = 1;
         zip.file(n, bl);
       });
     });
     chain.then(function () { return zip.generateAsync({ type: 'blob' }); }).then(function (bl) {
-      download(safeName(fileBase() + '_趨勢圖') + '.zip', bl); $('gMsg').textContent = '已下載 ' + pk.length + ' 張圖';
+      download(safeName(fileBase() + (lastGrids ? '_趨勢圖拼圖' : '_趨勢圖')) + '.zip', bl); $('gMsg').textContent = '已下載 ' + pk.length + ' 張' + (lastGrids ? '大圖' : '圖');
     });
   });
   function fileBase() { var p = cur(); return (p && p.code ? p.code + '_' : '') + lastChartOpts.cat + '_' + periodText(lastChartOpts.period).replace(/～/g, '-'); }
@@ -1408,7 +1482,7 @@
     var o = lastChartOpts, p = cur();
     var tables = Co.reportTables(st.recs, st.stds, { cat: o.cat, period: o.period, stations: o.stations, items: o.tableItems, split: radio('gSplit') });
     $('gMsg').textContent = '產生 Excel 中…';
-    XO.build(window.ExcelJS, window.JSZip, { project: p ? (p.code ? p.code + ' ' : '') + p.name : '', cat: o.cat, periodText: periodText(o.period), tables: tables, charts: pickedCharts(), mode: o.mode, std: $('gStd').checked, zero: $('gZero').checked, yRange: yrOf(o.cat) })
+    XO.build(window.ExcelJS, window.JSZip, { project: p ? (p.code ? p.code + ' ' : '') + p.name : '', cat: o.cat, periodText: periodText(o.period), tables: tables, charts: pickedCharts(), mode: baseMode(o.mode), std: $('gStd').checked, zero: $('gZero').checked, yRange: yrOf(o.cat) })
       .then(function (buf) { download(safeName(fileBase()) + '.xlsx', buf, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); $('gMsg').textContent = '已下載 Excel'; })
       .catch(function (e) { $('gMsg').textContent = ''; toast('Excel 產生失敗：' + e.message, true); });
   });

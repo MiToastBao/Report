@@ -340,3 +340,11 @@ table.mv-t th:first-child { background: #eef2f9; }
 /* v1.0.13 標準值期間重疊 */
 .std-t tr.ovl td { background: #fff4d6; }
 .ovl-note { color: #9a5b00; font-size: 12px; font-weight: 700; margin-top: 2px; }
+/* v1.0.15 拼圖選項 */
+.grid-opt { margin: 6px 0 2px 24px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.grid-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 6px; }
+.grid-lab { font-weight: 600; }
+.grid-custom { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.grid-opt .grid-custom input[type=number] { width: 64px; min-width: 0; padding-left: 8px; padding-right: 4px; }
+.fig.grid-fig canvas { max-width: 100%; }
+.fig.grid-fig { grid-column: 1 / -1; max-width: 1240px; }

@@ -95,7 +95,11 @@
       l.split('').forEach(function (ch) { if (c && ctx.measureText(c + ch).width > maxW) { out.push(c); c = ch; } else c += ch; });
       if (c) out.push(c);
     });
-    return out;
+    // v1.0.15：「）」「，」等不放在行首（併回上一行），避免只剩一個括號自成一行
+    for (var i = 1; i < out.length; i++) {
+      while (out[i] && /^[）)」』】〉》，、。：；！？%％]/.test(out[i])) { out[i - 1] += out[i].charAt(0); out[i] = out[i].slice(1); }
+    }
+    return out.filter(function (l) { return l !== ''; });
   }
   function draw(canvas, spec, o) {
     o = o || {};
@@ -450,5 +454,66 @@
     });
   }
 
-  return { draw: draw, barChartXml: barChartXml, inject: inject, niceScale: niceScale, range: range, PALETTE: PALETTE, stdText: stdText, yTitleOf: yTitleOf, stdColor: stdColor };
+  /* v1.0.15（#39、#40）拼圖：把多張單張圖依「欄 × 列」排成一張大圖（像報告的圖 2.1-1：一個測站 8 個測項 2 欄 × 4 列）。
+     specs：這一張大圖要放的單張圖（依序由左到右、由上到下）；格子比圖多時留白。
+     o：同 draw 的選項，另加 cols、rows、cellW、cellH、title（空白＝不印標題）、makeCanvas（測試用）。 */
+  var GRID_CELL = { w: 600, h: 380 }, GRID_GAP = 10, GRID_PAD = 14;
+  function compose(canvas, specs, o) {
+    o = o || {};
+    var scale = o.scale || 1, cols = Math.max(1, o.cols || 2), rows = Math.max(1, o.rows || 1);
+    var cw = o.cellW || GRID_CELL.w, chh = o.cellH || GRID_CELL.h;
+    var mk = o.makeCanvas || function () { return document.createElement('canvas'); };
+    var dopt = function (h) { return Object.assign({}, o, { scale: scale, width: cw, height: h, stationInTitle: false }); };
+    var cells = specs.slice(0, cols * rows).map(function (sp) {
+      var cv = mk();
+      var r = draw(cv, sp, dopt(chh));
+      return { cv: cv, h: r.height, sp: sp };
+    });
+    // 每格高度不一（X 軸標籤斜寫、圖例多列）時，全部用最高的那格重畫，格子大小一致、標題對齊
+    var boxH = Math.max.apply(null, cells.map(function (c) { return c.h; }).concat([chh]));
+    cells.forEach(function (c) { if (c.h < boxH) c.h = draw(c.cv, c.sp, dopt(boxH)).height; });
+    boxH = Math.max.apply(null, cells.map(function (c) { return c.h; }).concat([boxH]));
+    var fsT = 24, titleH = 0, tLines = [];
+    var W = GRID_PAD * 2 + cols * cw + (cols - 1) * GRID_GAP;
+    var ctx = canvas.getContext('2d');
+    if (o.title) {
+      ctx.font = 'bold ' + fsT + 'px ' + FONT;
+      tLines = wrapText(ctx, o.title, W - 40);
+      titleH = tLines.length * (fsT + 8) + 10;
+    }
+    var H = GRID_PAD * 2 + titleH + rows * boxH + (rows - 1) * GRID_GAP;
+    canvas.width = Math.round(W * scale); canvas.height = Math.round(H * scale);
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+    if (tLines.length) {
+      ctx.fillStyle = '#1b2233'; ctx.font = 'bold ' + fsT + 'px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      tLines.forEach(function (t, i) { ctx.fillText(t, W / 2, GRID_PAD + fsT + i * (fsT + 8)); });
+    }
+    cells.forEach(function (c, i) {
+      var x = GRID_PAD + (i % cols) * (cw + GRID_GAP), y = GRID_PAD + titleH + Math.floor(i / cols) * (boxH + GRID_GAP);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(c.cv, Math.round(x * scale), Math.round((y + (boxH - c.h) / 2) * scale));
+      ctx.setTransform(scale, 0, 0, scale, 0, 0);
+      ctx.strokeStyle = '#c9ced8'; ctx.lineWidth = 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, cw - 1, boxH - 1);
+    });
+    return { width: W, height: H, cells: cells.length };
+  }
+  /* 依排法把單張圖分頁：每頁 cols×rows 格。groupKey 相同的放在同一組（第 3 種＝同測站；第 4 種＝全部同一組）。 */
+  function gridPages(specs, cols, rows, groupKey) {
+    var per = Math.max(1, cols * rows), groups = [], idx = {};
+    specs.forEach(function (sp, i) {
+      var k = groupKey ? groupKey(sp) : '';
+      if (!(k in idx)) { idx[k] = groups.length; groups.push({ key: k, items: [] }); }
+      groups[idx[k]].items.push(i);
+    });
+    var pages = [];
+    groups.forEach(function (g) {
+      var n = Math.ceil(g.items.length / per);
+      for (var p = 0; p < n; p++) pages.push({ key: g.key, page: p + 1, pages: n, idx: g.items.slice(p * per, (p + 1) * per) });
+    });
+    return pages;
+  }
+
+  return { draw: draw, compose: compose, gridPages: gridPages, barChartXml: barChartXml, inject: inject, niceScale: niceScale, range: range, PALETTE: PALETTE, stdText: stdText, yTitleOf: yTitleOf, stdColor: stdColor };
 });

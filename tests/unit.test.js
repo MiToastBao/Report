@@ -510,3 +510,15 @@ test('#37 標準線依判定方式上色：上限紅、下限藍、範圍下藍�
   const xml = CH.barChartXml({ spec, catRef: "'s'!$A$2:$A$2", series: [{ nameRef: "'s'!$B$1", valRef: "'s'!$B$2:$B$2" }], stdSeries: [{ name: '標準值 6', color: '1238A6', vals: [6], nameRef: "'s'!$Z$4", valRef: "'s'!$AA$4:$AA$4" }, { name: '標準值 9', vals: [9], nameRef: "'s'!$Z$5", valRef: "'s'!$AA$5:$AA$5" }] });
   assert.ok(/srgbClr val="1238A6"/.test(xml) && /srgbClr val="E03131"/.test(xml));
 });
+
+test('#39/#40 拼圖分頁：第 3 種依測站分組、第 4 種全部一組；放不下時分成第 2 張', () => {
+  const sp = (st, it) => ({ kind: 'station', station: st, title: it });
+  const specs = [];
+  ['甲', '乙'].forEach(st => { for (let i = 0; i < 10; i++) specs.push(sp(st, 'i' + i)); });
+  const pg = CH.gridPages(specs, 2, 4, s => s.station);
+  assert.deepEqual(pg.map(p => [p.key, p.page, p.pages, p.idx.length]), [['甲', 1, 2, 8], ['甲', 2, 2, 2], ['乙', 1, 2, 8], ['乙', 2, 2, 2]]);
+  assert.deepEqual(pg[1].idx, [8, 9]);
+  const pg4 = CH.gridPages(specs.slice(0, 5), 3, 2, null);
+  assert.deepEqual(pg4.map(p => [p.page, p.pages, p.idx.length]), [[1, 1, 5]]);
+  assert.equal(CH.gridPages(specs, 1, 1, null).length, 20);
+});

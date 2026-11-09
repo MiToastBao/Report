@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>監測報告趨勢圖產生器</title>
-<link rel="stylesheet" href="css/app.css?v=1.0.14">
+<link rel="stylesheet" href="css/app.css?v=1.0.15">
 </head>
 <body>
 <div class="shell">
@@ -13,7 +13,7 @@
       <div class="mark" aria-hidden="true"><svg viewBox="0 0 32 32" width="26" height="26"><rect x="5" y="16" width="4.5" height="11" rx="1.2" fill="#fff" opacity=".55"/><rect x="11.5" y="10" width="4.5" height="17" rx="1.2" fill="#fff" opacity=".8"/><rect x="18" y="13" width="4.5" height="14" rx="1.2" fill="#fff" opacity=".65"/><rect x="24.5" y="6" width="4.5" height="21" rx="1.2" fill="#fff"/><path d="M3 9.5 H29" stroke="#ff8a8a" stroke-width="1.6" stroke-dasharray="2.6 2"/></svg></div>
       <div>
         <div class="brand-name">監測報告<br>趨勢圖產生器</div>
-        <div class="brand-ver" id="verPill">v1.0.14</div>
+        <div class="brand-ver" id="verPill">v1.0.15</div>
       </div>
     </div>
     <div class="proj-box">
@@ -35,7 +35,7 @@
       <div class="nav-group">不分計畫</div>
       <button class="nav-item" data-sec="moenv"><span class="nav-no">7</span>環境部資料查詢</button>
       <button class="nav-item" data-sec="backup"><span class="nav-no">8</span>備份與還原</button>
-      <a class="nav-item nav-link" href="使用說明.html?v=1.0.14" target="_blank" rel="noopener"><span class="nav-no">?</span>使用說明</a>
+      <a class="nav-item nav-link" href="使用說明.html?v=1.0.15" target="_blank" rel="noopener"><span class="nav-no">?</span>使用說明</a>
     </nav>
     <div class="side-foot">資料只存在這台電腦的瀏覽器，不會上傳。</div>
   </aside>
@@ -189,6 +189,24 @@
               <div class="opt-title">圖的樣式</div>
               <label class="radio"><input type="radio" name="gMode" value="station" checked> 每個測站、每個測項各一張</label>
               <label class="radio"><input type="radio" name="gMode" value="item"> 每個測項一張，各測站並列</label>
+              <label class="radio"><input type="radio" name="gMode" value="stationGrid"> 拼成大圖：一個測站一張（每個測項各一格）</label>
+              <label class="radio"><input type="radio" name="gMode" value="itemGrid"> 拼成大圖：各測項並列圖拼成一張</label>
+              <div class="grid-opt" id="gGridOpt" hidden>
+                <div class="grid-row"><span class="grid-lab">排法</span>
+                  <select id="gGrid">
+                    <option value="2x2">2 欄 × 2 列（4 格）</option>
+                    <option value="2x3">2 欄 × 3 列（6 格，直式）</option>
+                    <option value="2x4" selected>2 欄 × 4 列（8 格，直式）</option>
+                    <option value="3x2">3 欄 × 2 列（6 格，橫式）</option>
+                    <option value="3x3">3 欄 × 3 列（9 格）</option>
+                    <option value="4x2">4 欄 × 2 列（8 格，橫式）</option>
+                    <option value="custom">自訂…</option>
+                  </select>
+                  <span id="gGridCustom" class="grid-custom" hidden><input type="number" id="gGridC" min="1" max="6" value="2"> 欄 × <input type="number" id="gGridR" min="1" max="8" value="4"> 列</span>
+                </div>
+                <label class="chk"><input type="checkbox" id="gGridTitle"> 大圖上方印標題（報告的圖說若寫在 Word 裡就不用勾）</label>
+                <div class="small muted">欄＝左右幾張、列＝上下幾張。測項比格子多時自動分成第 2 張大圖，少的格子留白。每格不重複寫測站名稱。</div>
+              </div>
             </div>
             <div class="opt-block">
               <div class="opt-title">X 軸</div>
@@ -304,17 +322,17 @@
   </main>
 </div>
 
-<script src="vendor/jszip.min.js?v=1.0.14"></script>
-<script src="vendor/xlsx.full.min.js?v=1.0.14"></script>
-<script src="vendor/exceljs.min.js?v=1.0.14"></script>
-<script src="js/version.js?v=1.0.14"></script>
-<script src="js/docread.js?v=1.0.14"></script>
-<script src="js/extract.js?v=1.0.14"></script>
-<script src="js/core.js?v=1.0.14"></script>
-<script src="js/chart.js?v=1.0.14"></script>
-<script src="js/xlsxout.js?v=1.0.14"></script>
-<script src="js/moenv.js?v=1.0.14"></script>
-<script src="js/store.js?v=1.0.14"></script>
-<script src="js/app.js?v=1.0.14"></script>
+<script src="vendor/jszip.min.js?v=1.0.15"></script>
+<script src="vendor/xlsx.full.min.js?v=1.0.15"></script>
+<script src="vendor/exceljs.min.js?v=1.0.15"></script>
+<script src="js/version.js?v=1.0.15"></script>
+<script src="js/docread.js?v=1.0.15"></script>
+<script src="js/extract.js?v=1.0.15"></script>
+<script src="js/core.js?v=1.0.15"></script>
+<script src="js/chart.js?v=1.0.15"></script>
+<script src="js/xlsxout.js?v=1.0.15"></script>
+<script src="js/moenv.js?v=1.0.15"></script>
+<script src="js/store.js?v=1.0.15"></script>
+<script src="js/app.js?v=1.0.15"></script>
 </body>
 </html>
