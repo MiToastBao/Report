@@ -284,7 +284,11 @@
         L.legRowH = []; for (var rr = 0; rr < L.legRows; rr++) { var mx = 1; for (var q = rr * L.perRow; q < Math.min(ns, (rr + 1) * L.perRow); q++) mx = Math.max(mx, L.legLines[q].length); L.legRowH.push(mx * (fs.legend + 4) + 6); }
       }
       L.legH = L.legRows ? L.legRowH.reduce(function (a, b) { return a + b; }, 0) + 10 : 0;
-      L.bottom = 10 + L.labH + 8 + L.legH + 6;
+      // v1.0.18（#63）X 軸標題（o.xTitle 有字才畫），放在 X 軸標籤下方、圖例上方
+      ctx.font = font(fs.axis);
+      L.xtLines = o.xTitle ? wrapText(ctx, String(o.xTitle), W - 20) : [];
+      L.xtH = L.xtLines.length ? L.xtLines.length * (fs.axis + 4) + 6 : 0;
+      L.bottom = 10 + L.labH + 8 + L.xtH + L.legH + 6;
       L.plotH = Math.max(220, H0 - L.top - L.bottom);
       ctx.font = font(fs.axis);
       L.yLines = hide.yTitle ? [] : wrapText(ctx, yTitleOf(spec), L.plotH - 10);
@@ -525,11 +529,17 @@
         ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(c, 0, 0); ctx.restore();
       }
     });
+    if (L.xtLines.length) {
+      ctx.save(); ctx.font = font(fs.axis); ctx.fillStyle = '#1b2233'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      var xtx = Math.min(W - 10, Math.max(10, L.left + L.plotW / 2)), xty = L.top + L.plotH + 8 + L.labH + 6;
+      L.xtLines.forEach(function (t, i) { var tw = ctx.measureText(t).width, cx = Math.min(W - 10 - tw / 2, Math.max(10 + tw / 2, xtx)); richText(ctx, t, cx, xty + i * (fs.axis + 4), fs.axis, false); });
+      ctx.restore();
+    }
     // 圖例
     if (L.legRows) {
       ctx.font = font(fs.legend); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
       var totalW = Math.min(ns, L.perRow) * L.cellW;
-      var lx0 = (W - totalW) / 2, ly0 = L.top + L.plotH + 10 + L.labH + 10, sq = fs.legend;
+      var lx0 = (W - totalW) / 2, ly0 = L.top + L.plotH + 10 + L.labH + 10 + L.xtH, sq = fs.legend;
       spec.series.forEach(function (s, si) {
         var row = Math.floor(si / L.perRow), col = si % L.perRow, rowY = 0;
         for (var r2 = 0; r2 < row; r2++) rowY += L.legRowH[r2];

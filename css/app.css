@@ -364,7 +364,7 @@ table.mv-t th:first-child { background: #eef2f9; }
 .ord-list li { padding: 3px 0; border-bottom: 1px dashed #e3e7ee; }
 .ord-list li > * { vertical-align: middle; }
 .ord-list li { display: list-item; }
-.ord-list .ord-name { display: inline-block; min-width: 0; max-width: calc(100% - 110px); overflow-wrap: anywhere; }
+.ord-list .ord-name { display: inline-block; min-width: 0; max-width: calc(100% - 145px); overflow-wrap: anywhere; }
 .ord-list .ord-btns { float: right; display: inline-flex; gap: 4px; }
 .ord-list li.off .ord-name { color: #8a93a6; }
 .ord-list button[disabled] { opacity: .35; cursor: default; }
@@ -385,3 +385,13 @@ table.mv-t th:first-child { background: #eef2f9; }
 .alias-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .alias-row .alias-orig { flex: 1 1 9em; min-width: 6em; overflow-wrap: anywhere; font-size: 13px; }
 .alias-row input[type=text] { flex: 1 1 9em; min-width: 0; width: auto; padding: 4px 6px; }
+/* v1.0.18 拖曳排序 */
+.ord-list li[data-li] { cursor: grab; user-select: none; position: relative; }
+.ord-list.is-dragging, .ord-list.is-dragging li { cursor: grabbing; }
+.ord-grip { display: inline-block; width: 1.4em; color: #8a93a6; font-size: 15px; touch-action: none; cursor: grab; }
+.ord-list li.dragging { opacity: .45; background: #eef3fd; }
+.ord-list li.drop-before { box-shadow: inset 0 3px 0 #2f6fed; }
+.ord-list li.drop-after { box-shadow: inset 0 -3px 0 #2f6fed; }
+.ord-list .ord-name sub, .ord-list .ord-name sup { font-size: .72em; line-height: 0; }
+.xt-opt { display: inline-flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+.xt-opt input[type=text] { width: 8.5em; min-width: 0; padding: 3px 6px; }

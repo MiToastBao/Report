@@ -1210,7 +1210,8 @@
       formInitPid = st.pid;
       if (f.mode) setRadio('gMode', f.mode); if (f.x) setRadio('gX', f.x); if (f.split) setRadio('gSplit', f.split);
       ['gStd', 'gZero', 'gND', 'gLT', 'gNA', 'gPH', 'gStTitle', 'gStdAxis', 'gGridTitle', 'gNoStd'].forEach(function (id) { if (f[id] != null) $(id).checked = f[id]; });
-      ['gShTitle', 'gShYTitle', 'gShYTicks', 'gShXTicks', 'gShStd', 'gStdSites'].forEach(function (id) { if (f[id] != null) $(id).checked = f[id]; });
+      ['gShTitle', 'gShYTitle', 'gShYTicks', 'gShXTicks', 'gShStd', 'gStdSites', 'gShXTitle'].forEach(function (id) { if (f[id] != null) $(id).checked = f[id]; });
+      if (f.xTitle != null) $('gXTitle').value = f.xTitle;
       if (f.fk) $('gFk').value = String(f.fk);
       if (f.leg) setRadio('gLeg', f.leg);
       if (f.type) setRadio('gType', f.type);
@@ -1282,7 +1283,7 @@
   function renderOrd() {
     var list = curItemList(), on = {}; checkedVals('gItems').forEach(function (v) { on[v] = 1; });
     $('gOrdList').innerHTML = list.map(function (it, i) {
-      return '<li class="' + (on[it] ? '' : 'off') + '"><span class="ord-name">' + esc(it) + (on[it] ? '' : '<span class="muted">（未勾選）</span>') + '</span>' +
+      return '<li class="' + (on[it] ? '' : 'off') + '" data-li="' + i + '"><span class="ord-grip" title="按住拖曳到想要的位置">⠿</span><span class="ord-name">' + richHtml(it) + (on[it] ? '' : '<span class="muted">（未勾選）</span>') + '</span>' +
         '<span class="ord-btns"><button type="button" class="mini-btn" data-ord="top" data-oi="' + i + '" title="移到最前面"' + (i ? '' : ' disabled') + '>最前</button>' +
         '<button type="button" class="mini-btn" data-ord="up" data-oi="' + i + '" title="往前"' + (i ? '' : ' disabled') + '>▲</button>' +
         '<button type="button" class="mini-btn" data-ord="down" data-oi="' + i + '" title="往後"' + (i < list.length - 1 ? '' : ' disabled') + '>▼</button></span></li>';
@@ -1298,13 +1299,62 @@
   $('gOrdBtn').addEventListener('click', function (e) { e.preventDefault(); var b = $('gOrd'); b.hidden = !b.hidden; if (!b.hidden) renderOrd(); });
   $('gOrdDone').addEventListener('click', function () { $('gOrd').hidden = true; });
   $('gOrdReset').addEventListener('click', function () { setOrder(null); toast('已恢復預設順序'); });
+  // 重排後保留清單捲動位置（重畫清單會回到最上面）
+  function setOrderKeep(list) { var box = $('gOrdList'), y = box.scrollTop; setOrder(list); box.scrollTop = y; }
   $('gOrdList').addEventListener('click', function (e) {
     var b = e.target.closest('[data-ord]'); if (!b || b.disabled) return;
     var list = curItemList(), i = +b.getAttribute('data-oi'), k = b.getAttribute('data-ord'), it = list[i];
     list.splice(i, 1);
     list.splice(k === 'top' ? 0 : k === 'up' ? i - 1 : i + 1, 0, it);
-    setOrder(list);
+    setOrderKeep(list);
   });
+  /* v1.0.18（#61）拖曳排序：按住一列（滑鼠：整列；手指：左邊的 ⠿）拖到想要的位置放開；藍線標出會插在哪裡；拉到清單上下邊緣會自動捲動 */
+  (function () {
+    var box = $('gOrdList'), drag = null;
+    function rows() { return Array.prototype.slice.call(box.querySelectorAll('li[data-li]')); }
+    function clearMarks() { rows().forEach(function (li) { li.classList.remove('drop-before', 'drop-after'); }); }
+    function targetOf(y) {
+      var rs = rows(), t = rs.length;
+      for (var i = 0; i < rs.length; i++) { var r = rs[i].getBoundingClientRect(); if (y < r.top + r.height / 2) { t = i; break; } }
+      return t; // 插在第 t 個之前（t＝長度＝最後面）
+    }
+    function mark(t) {
+      clearMarks(); var rs = rows();
+      if (t < rs.length) rs[t].classList.add('drop-before'); else if (rs.length) rs[rs.length - 1].classList.add('drop-after');
+    }
+    function autoScroll(y) {
+      var r = box.getBoundingClientRect(), edge = 28;
+      if (y < r.top + edge) box.scrollTop -= Math.ceil((r.top + edge - y) / 3);
+      else if (y > r.bottom - edge) box.scrollTop += Math.ceil((y - r.bottom + edge) / 3);
+    }
+    box.addEventListener('pointerdown', function (e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      if (e.target.closest('button')) return;
+      var li = e.target.closest('li[data-li]'); if (!li) return;
+      if (e.pointerType !== 'mouse' && !e.target.closest('.ord-grip')) return; // 手指只從把手開始，才不會擋到捲動
+      drag = { from: +li.getAttribute('data-li'), li: li, y0: e.clientY, on: false, id: e.pointerId };
+      try { box.setPointerCapture(e.pointerId); } catch (x) {}
+    });
+    box.addEventListener('pointermove', function (e) {
+      if (!drag || e.pointerId !== drag.id) return;
+      if (!drag.on) { if (Math.abs(e.clientY - drag.y0) < 4) return; drag.on = true; drag.li.classList.add('dragging'); box.classList.add('is-dragging'); }
+      e.preventDefault();
+      autoScroll(e.clientY);
+      drag.to = targetOf(e.clientY); mark(drag.to);
+    });
+    function end(e) {
+      if (!drag || (e && e.pointerId !== drag.id)) return;
+      var d = drag; drag = null;
+      clearMarks(); box.classList.remove('is-dragging'); if (d.li) d.li.classList.remove('dragging');
+      if (!d.on || d.to == null) return;
+      var list = curItemList(), it = list[d.from], to = d.to > d.from ? d.to - 1 : d.to;
+      if (to === d.from) return;
+      list.splice(d.from, 1); list.splice(to, 0, it);
+      setOrderKeep(list);
+    }
+    box.addEventListener('pointerup', end);
+    box.addEventListener('pointercancel', function () { if (!drag) return; var d = drag; drag = null; clearMarks(); box.classList.remove('is-dragging'); if (d.li) d.li.classList.remove('dragging'); });
+  })();
   function p2(n) { return (n < 10 ? '0' : '') + n; }
   function periodSel() {
     var fy = +$('gFromY').value, fm = +$('gFromM').value, ty = +$('gToY').value, tm = +$('gToM').value;
@@ -1366,13 +1416,14 @@
     $('gStTitleLab').hidden = m !== 'station';
     txtSum();
   }
-  ['gShTitle', 'gShYTitle', 'gShYTicks', 'gShXTicks', 'gShStd', 'gStdSites', 'gFk'].forEach(function (id) { $(id).addEventListener('change', function () { saveForm(); txtSum(); redrawCharts(); }); });
+  ['gShTitle', 'gShYTitle', 'gShYTicks', 'gShXTicks', 'gShStd', 'gStdSites', 'gShXTitle', 'gXTitle', 'gFk'].forEach(function (id) { $(id).addEventListener('change', function () { saveForm(); txtSum(); redrawCharts(); }); });
   // 收合時標題列顯示目前設定摘要
   function txtSum() {
     var m = radio('gMode');
     var off = [['gGridTitle', '大圖標題', true], m === 'station' ? ['gStTitle', '標題的測站名稱'] : ['gGridTitle', '', true], ['gShTitle', '測項名稱'], ['gShYTitle', 'Y 軸標題'], ['gShYTicks', 'Y 軸刻度'], ['gShXTicks', 'X 軸標籤'], ['gShStd', '標準值文字']]
       .filter(function (x) { return x[2] ? false : !$(x[0]).checked; }).map(function (x) { return x[1]; });
     var fk = +$('gFk').value, parts = [];
+    if ($('gShXTitle').checked) parts.push('X 軸標題「' + ($('gXTitle').value.trim() || '採樣日期') + '」');
     if (fk !== 1) parts.push('文字 ' + fk + ' 倍');
     if (isGrid(m) && $('gGridTitle').checked) parts.push('印大圖標題');
     if (off.length) parts.push('不顯示：' + off.join('、'));
@@ -1427,13 +1478,13 @@
   function checkedVals(id) { return Array.prototype.map.call($(id).querySelectorAll('input:checked'), function (c) { return c.value; }); }
   function saveForm() {
     if (!st.pid) return;
-    st.meta.chartForm = { cat: $('gCat').value, fromY: +$('gFromY').value, fromM: +$('gFromM').value, toY: +$('gToY').value, toM: +$('gToM').value, mode: radio('gMode'), x: radio('gX'), split: radio('gSplit'), sts: checkedVals('gSts'), items: checkedVals('gItems'), gStd: $('gStd').checked, gZero: $('gZero').checked, gND: $('gND').checked, gLT: $('gLT').checked, gNA: $('gNA').checked, gPH: $('gPH').checked, gStTitle: $('gStTitle').checked, gStdAxis: $('gStdAxis').checked, grid: $('gGrid').value, gridC: +$('gGridC').value, gridR: +$('gGridR').value, gGridTitle: $('gGridTitle').checked, gShTitle: $('gShTitle').checked, gShYTitle: $('gShYTitle').checked, gShYTicks: $('gShYTicks').checked, gShXTicks: $('gShXTicks').checked, gShStd: $('gShStd').checked, gStdSites: $('gStdSites').checked, gNoStd: $('gNoStd').checked, type: radio('gType'), fk: +$('gFk').value, leg: radio('gLeg') };
+    st.meta.chartForm = { cat: $('gCat').value, fromY: +$('gFromY').value, fromM: +$('gFromM').value, toY: +$('gToY').value, toM: +$('gToM').value, mode: radio('gMode'), x: radio('gX'), split: radio('gSplit'), sts: checkedVals('gSts'), items: checkedVals('gItems'), gStd: $('gStd').checked, gZero: $('gZero').checked, gND: $('gND').checked, gLT: $('gLT').checked, gNA: $('gNA').checked, gPH: $('gPH').checked, gStTitle: $('gStTitle').checked, gStdAxis: $('gStdAxis').checked, grid: $('gGrid').value, gridC: +$('gGridC').value, gridR: +$('gGridR').value, gGridTitle: $('gGridTitle').checked, gShTitle: $('gShTitle').checked, gShYTitle: $('gShYTitle').checked, gShYTicks: $('gShYTicks').checked, gShXTicks: $('gShXTicks').checked, gShStd: $('gShStd').checked, gStdSites: $('gStdSites').checked, gShXTitle: $('gShXTitle').checked, xTitle: $('gXTitle').value, gNoStd: $('gNoStd').checked, type: radio('gType'), fk: +$('gFk').value, leg: radio('gLeg') };
     saveMeta();
   }
   function drawOpts(scale) {
     return { scale: scale, std: $('gStd').checked, stdAxis: $('gStdAxis').checked, zero: $('gZero').checked, marks: { nd: $('gND').checked, lt: $('gLT').checked, na: $('gNA').checked, ph: $('gPH').checked }, stationInTitle: $('gStTitle').checked, yRange: yrOf((lastChartOpts && lastChartOpts.cat) || $('gCat').value),
       // v1.0.16（#50、#51）文字顯示與大小：四種圖都適用（Excel 圖表不受影響）
-      chartType: radio('gType'), fontScale: +$('gFk').value || 1, noStdText: $('gNoStd').checked, stdSites: $('gStdSites').checked,
+      chartType: radio('gType'), fontScale: +$('gFk').value || 1, noStdText: $('gNoStd').checked, stdSites: $('gStdSites').checked, xTitle: $('gShXTitle').checked ? ($('gXTitle').value.trim() || '採樣日期') : '',
       hide: { title: !$('gShTitle').checked, yTitle: !$('gShYTitle').checked, yTicks: !$('gShYTicks').checked, xTicks: !$('gShXTicks').checked, stdText: !$('gShStd').checked, legend: legMode() === 'none' } };
   }
   $('gGo').addEventListener('click', function () {
