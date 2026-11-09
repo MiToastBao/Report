@@ -229,6 +229,9 @@
     if (spec.kind === 'station' && o.stationInTitle) tParts.push(spec.station);
     if (!(o.hide || {}).title) tParts.push(spec.title);
     var titleText = tParts.join('　');
+    // v1.0.19（#64）取消「Y 軸範圍包含標準值」時，超出資料範圍的標準值不畫線；勾選 stdOutText 時只寫「標準值 XX」（沒有虛線記號）
+    var outTxt = !sc.fixed && o.std !== false && o.stdAxis === false && o.stdOutText && !(o.hide || {}).stdText
+      ? uniqStd((spec.stdLines || []).filter(function (l) { return l.v < sc.min || l.v > sc.max; })) : [];
     ctx.save();
     ctx.font = font(fs.title, true);
     var titleLines = titleText ? wrapText(ctx, titleText, W - 60) : [];
@@ -244,8 +247,9 @@
       ctx.font = font(fs.std, true);
       // 逐字換行（中文說明在空白處斷開會把「標準值 60」和「dB」拆開）
       L = { bandRows: band.map(function (ln) { return wrapText(ctx, stdText(ln, spec.unit, o.stdSites), W - 20 - 38, true); }),
-        outRows: outStd.map(function (ln) { return wrapText(ctx, '※ ' + stdText(ln, spec.unit, o.stdSites) + ' 超出 Y 軸範圍，未畫線', W - 20, true); }) };
-      var nBand = noStdBand ? 1 : 0; L.bandRows.concat(L.outRows).forEach(function (r) { nBand += r.length; });
+        outRows: outStd.map(function (ln) { return wrapText(ctx, '※ ' + stdText(ln, spec.unit, o.stdSites) + ' 超出 Y 軸範圍，未畫線', W - 20, true); }),
+        txtRows: outTxt.map(function (ln) { return wrapText(ctx, stdText(ln, spec.unit, o.stdSites), W - 20, true); }) };
+      var nBand = noStdBand ? 1 : 0; L.bandRows.concat(L.outRows, L.txtRows).forEach(function (r) { nBand += r.length; });
       var topBand = nBand ? nBand * (fs.std + 8) + 6 : 0;
       ctx.font = font(fs.tick, true);
       L.clipW = Math.max.apply(null, clipUp.map(function (c) { return ctx.measureText(c.t).width; }).concat([0]));
@@ -505,6 +509,14 @@
     // 超出自訂 Y 軸範圍、沒畫的標準值
     outStd.forEach(function (ln, k) {
       var rows = L.outRows[k] || [];
+      var tw = Math.max.apply(null, rows.map(function (t) { return ctx.measureText(t).width; }).concat([0]));
+      var x = L.left + Math.max(0, (L.plotW - tw) / 2); if (x + tw > W - 10) x = Math.max(10, W - 10 - tw);
+      ctx.textBaseline = 'middle'; ctx.textAlign = 'left'; ctx.fillStyle = stdColor(ln);
+      rows.forEach(function (t) { richText(ctx, t, x, L.bandTop + rowI * (fs.std + 8) + fs.std / 2 + 2, fs.std, true, plainSt); rowI++; });
+    });
+    outTxt.forEach(function (ln, k) {
+      var rows = L.txtRows[k] || [];
+      ctx.font = font(fs.std, true);
       var tw = Math.max.apply(null, rows.map(function (t) { return ctx.measureText(t).width; }).concat([0]));
       var x = L.left + Math.max(0, (L.plotW - tw) / 2); if (x + tw > W - 10) x = Math.max(10, W - 10 - tw);
       ctx.textBaseline = 'middle'; ctx.textAlign = 'left'; ctx.fillStyle = stdColor(ln);

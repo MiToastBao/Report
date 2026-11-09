@@ -395,3 +395,4 @@ table.mv-t th:first-child { background: #eef2f9; }
 .ord-list .ord-name sub, .ord-list .ord-name sup { font-size: .72em; line-height: 0; }
 .xt-opt { display: inline-flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
 .xt-opt input[type=text] { width: 8.5em; min-width: 0; padding: 3px 6px; }
+.chk.dim { opacity: .5; }

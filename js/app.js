@@ -1209,9 +1209,10 @@
     if (formInitPid !== st.pid) {
       formInitPid = st.pid;
       if (f.mode) setRadio('gMode', f.mode); if (f.x) setRadio('gX', f.x); if (f.split) setRadio('gSplit', f.split);
-      ['gStd', 'gZero', 'gND', 'gLT', 'gNA', 'gPH', 'gStTitle', 'gStdAxis', 'gGridTitle', 'gNoStd'].forEach(function (id) { if (f[id] != null) $(id).checked = f[id]; });
+      ['gStd', 'gZero', 'gND', 'gLT', 'gNA', 'gPH', 'gStTitle', 'gStdAxis', 'gGridTitle', 'gNoStd', 'gStdOut'].forEach(function (id) { if (f[id] != null) $(id).checked = f[id]; });
       ['gShTitle', 'gShYTitle', 'gShYTicks', 'gShXTicks', 'gShStd', 'gStdSites', 'gShXTitle'].forEach(function (id) { if (f[id] != null) $(id).checked = f[id]; });
       if (f.xTitle != null) $('gXTitle').value = f.xTitle;
+      syncStdOut();
       if (f.fk) $('gFk').value = String(f.fk);
       if (f.leg) setRadio('gLeg', f.leg);
       if (f.type) setRadio('gType', f.type);
@@ -1462,7 +1463,10 @@
   Array.prototype.forEach.call(document.querySelectorAll('input[name=gType]'), function (r) { r.addEventListener('change', function () { saveForm(); txtSum(); redrawCharts(); }); });
   $('gGridTitle').addEventListener('change', function () { saveForm(); txtSum(); redrawCharts(); });
   // v1.0.15（#41）：圖的畫法勾選一改就重畫（以前要再按「產生趨勢圖」，而且下載的高解析圖會照新勾選、和畫面上不一樣）
-  ['gStd', 'gStdAxis', 'gZero', 'gND', 'gLT', 'gNA', 'gPH', 'gStTitle', 'gNoStd'].forEach(function (id) { $(id).addEventListener('change', function () { saveForm(); if (id === 'gStTitle') txtSum(); redrawCharts(); }); });
+  ['gStd', 'gStdAxis', 'gZero', 'gND', 'gLT', 'gNA', 'gPH', 'gStTitle', 'gNoStd', 'gStdOut'].forEach(function (id) { $(id).addEventListener('change', function () { saveForm(); if (id === 'gStTitle') txtSum(); if (id === 'gStdAxis') syncStdOut(); redrawCharts(); }); });
+  // 「仍寫出標準值 XX」只在取消「Y 軸範圍包含標準值」時有用，其他時候淡化
+  function syncStdOut() { var on = !$('gStdAxis').checked; $('gStdOutLab').classList.toggle('dim', !on); $('gStdOut').disabled = !on; }
+  syncStdOut();
   var lastGrids = null;
   syncGridOpt(); // 開啟網頁時先依目前的圖的樣式整理選項
   function gridTitle(g) {
@@ -1478,13 +1482,13 @@
   function checkedVals(id) { return Array.prototype.map.call($(id).querySelectorAll('input:checked'), function (c) { return c.value; }); }
   function saveForm() {
     if (!st.pid) return;
-    st.meta.chartForm = { cat: $('gCat').value, fromY: +$('gFromY').value, fromM: +$('gFromM').value, toY: +$('gToY').value, toM: +$('gToM').value, mode: radio('gMode'), x: radio('gX'), split: radio('gSplit'), sts: checkedVals('gSts'), items: checkedVals('gItems'), gStd: $('gStd').checked, gZero: $('gZero').checked, gND: $('gND').checked, gLT: $('gLT').checked, gNA: $('gNA').checked, gPH: $('gPH').checked, gStTitle: $('gStTitle').checked, gStdAxis: $('gStdAxis').checked, grid: $('gGrid').value, gridC: +$('gGridC').value, gridR: +$('gGridR').value, gGridTitle: $('gGridTitle').checked, gShTitle: $('gShTitle').checked, gShYTitle: $('gShYTitle').checked, gShYTicks: $('gShYTicks').checked, gShXTicks: $('gShXTicks').checked, gShStd: $('gShStd').checked, gStdSites: $('gStdSites').checked, gShXTitle: $('gShXTitle').checked, xTitle: $('gXTitle').value, gNoStd: $('gNoStd').checked, type: radio('gType'), fk: +$('gFk').value, leg: radio('gLeg') };
+    st.meta.chartForm = { cat: $('gCat').value, fromY: +$('gFromY').value, fromM: +$('gFromM').value, toY: +$('gToY').value, toM: +$('gToM').value, mode: radio('gMode'), x: radio('gX'), split: radio('gSplit'), sts: checkedVals('gSts'), items: checkedVals('gItems'), gStd: $('gStd').checked, gZero: $('gZero').checked, gND: $('gND').checked, gLT: $('gLT').checked, gNA: $('gNA').checked, gPH: $('gPH').checked, gStTitle: $('gStTitle').checked, gStdAxis: $('gStdAxis').checked, grid: $('gGrid').value, gridC: +$('gGridC').value, gridR: +$('gGridR').value, gGridTitle: $('gGridTitle').checked, gShTitle: $('gShTitle').checked, gShYTitle: $('gShYTitle').checked, gShYTicks: $('gShYTicks').checked, gShXTicks: $('gShXTicks').checked, gShStd: $('gShStd').checked, gStdSites: $('gStdSites').checked, gShXTitle: $('gShXTitle').checked, xTitle: $('gXTitle').value, gNoStd: $('gNoStd').checked, gStdOut: $('gStdOut').checked, type: radio('gType'), fk: +$('gFk').value, leg: radio('gLeg') };
     saveMeta();
   }
   function drawOpts(scale) {
     return { scale: scale, std: $('gStd').checked, stdAxis: $('gStdAxis').checked, zero: $('gZero').checked, marks: { nd: $('gND').checked, lt: $('gLT').checked, na: $('gNA').checked, ph: $('gPH').checked }, stationInTitle: $('gStTitle').checked, yRange: yrOf((lastChartOpts && lastChartOpts.cat) || $('gCat').value),
       // v1.0.16（#50、#51）文字顯示與大小：四種圖都適用（Excel 圖表不受影響）
-      chartType: radio('gType'), fontScale: +$('gFk').value || 1, noStdText: $('gNoStd').checked, stdSites: $('gStdSites').checked, xTitle: $('gShXTitle').checked ? ($('gXTitle').value.trim() || '採樣日期') : '',
+      chartType: radio('gType'), fontScale: +$('gFk').value || 1, noStdText: $('gNoStd').checked, stdOutText: $('gStdOut').checked, stdSites: $('gStdSites').checked, xTitle: $('gShXTitle').checked ? ($('gXTitle').value.trim() || '採樣日期') : '',
       hide: { title: !$('gShTitle').checked, yTitle: !$('gShYTitle').checked, yTicks: !$('gShYTicks').checked, xTicks: !$('gShXTicks').checked, stdText: !$('gShStd').checked, legend: legMode() === 'none' } };
   }
   $('gGo').addEventListener('click', function () {
