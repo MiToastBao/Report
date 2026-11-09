@@ -232,6 +232,7 @@
     // v1.0.19（#64）取消「Y 軸範圍包含標準值」時，超出資料範圍的標準值不畫線；勾選 stdOutText 時只寫「標準值 XX」（沒有虛線記號）
     var outTxt = !sc.fixed && o.std !== false && o.stdAxis === false && o.stdOutText && !(o.hide || {}).stdText
       ? uniqStd((spec.stdLines || []).filter(function (l) { return l.v < sc.min || l.v > sc.max; })) : [];
+    var txtBand = false; // v1.0.20（#65）先放繪圖區左上角（和「無標準值」、有畫線時的標準值文字同位置），被擋住才放到圖上方
     ctx.save();
     ctx.font = font(fs.title, true);
     var titleLines = titleText ? wrapText(ctx, titleText, W - 60) : [];
@@ -249,7 +250,7 @@
       L = { bandRows: band.map(function (ln) { return wrapText(ctx, stdText(ln, spec.unit, o.stdSites), W - 20 - 38, true); }),
         outRows: outStd.map(function (ln) { return wrapText(ctx, '※ ' + stdText(ln, spec.unit, o.stdSites) + ' 超出 Y 軸範圍，未畫線', W - 20, true); }),
         txtRows: outTxt.map(function (ln) { return wrapText(ctx, stdText(ln, spec.unit, o.stdSites), W - 20, true); }) };
-      var nBand = noStdBand ? 1 : 0; L.bandRows.concat(L.outRows, L.txtRows).forEach(function (r) { nBand += r.length; });
+      var nBand = noStdBand ? 1 : 0; L.bandRows.concat(L.outRows, txtBand ? L.txtRows : []).forEach(function (r) { nBand += r.length; });
       var topBand = nBand ? nBand * (fs.std + 8) + 6 : 0;
       ctx.font = font(fs.tick, true);
       L.clipW = Math.max.apply(null, clipUp.map(function (c) { return ctx.measureText(c.t).width; }).concat([0]));
@@ -345,6 +346,20 @@
         var nr = { x: L.left + 4, y: L.top + 2, w: ctx.measureText(NOSTD).width + 8, h: fs.std + 6 };
         if (L.bars.some(function (b) { return nr.x < b.x + b.w && nr.x + nr.w > b.x && nr.y < b.y + b.h && nr.y + nr.h > b.y; })) { noStdBand = true; needNoStd = true; }
         else L.noStdAt = nr;
+      }
+      if (outTxt.length && !txtBand) {
+        ctx.font = font(fs.std, true);
+        var ty0 = L.top + 2, hitT = false, adds = [];
+        outTxt.forEach(function (ln) {
+          wrapText(ctx, stdText(ln, spec.unit, o.stdSites), L.plotW - 12, true).forEach(function (t) {
+            var r = { x: L.left + 4, y: ty0, w: ctx.measureText(t).width + 8, h: fs.std + 6 };
+            if (r.y + r.h > L.top + L.plotH - 1 || L.bars.some(function (b) { return r.x < b.x + b.w && r.x + r.w > b.x && r.y < b.y + b.h && r.y + r.h > b.y; })) hitT = true;
+            adds.push({ x: r.x, y: r.y, w: r.w, h: r.h, tx: r.x + 4, ty: r.y + 3, txt: t, color: stdColor(ln) });
+            ty0 += fs.std + 6;
+          });
+        });
+        if (hitT) { txtBand = true; needNoStd = true; }
+        else adds.forEach(function (a) { L.labels.push(a); }); // 和有畫線的標準值文字一起畫；畫線的文字會避開這些位置
       }
       if (!hide.stdText) stdList.forEach(function (ln) {
         if (band.indexOf(ln) >= 0 || ln.lead === false) return; // 季節性標準分成多段時，只在最長的一段標文字
@@ -514,17 +529,17 @@
       ctx.textBaseline = 'middle'; ctx.textAlign = 'left'; ctx.fillStyle = stdColor(ln);
       rows.forEach(function (t) { richText(ctx, t, x, L.bandTop + rowI * (fs.std + 8) + fs.std / 2 + 2, fs.std, true, plainSt); rowI++; });
     });
-    outTxt.forEach(function (ln, k) {
+    if (txtBand) outTxt.forEach(function (ln, k) {
       var rows = L.txtRows[k] || [];
       ctx.font = font(fs.std, true);
       var tw = Math.max.apply(null, rows.map(function (t) { return ctx.measureText(t).width; }).concat([0]));
-      var x = L.left + Math.max(0, (L.plotW - tw) / 2); if (x + tw > W - 10) x = Math.max(10, W - 10 - tw);
+      var x = L.left + 4; if (x + tw > W - 10) x = Math.max(10, W - 10 - tw); // 左上角被擋住時：放在繪圖區正上方、靠左對齊 Y 軸（仍在左上角，不壓到長條）
       ctx.textBaseline = 'middle'; ctx.textAlign = 'left'; ctx.fillStyle = stdColor(ln);
       rows.forEach(function (t) { richText(ctx, t, x, L.bandTop + rowI * (fs.std + 8) + fs.std / 2 + 2, fs.std, true, plainSt); rowI++; });
     });
     if (noStd) {
       ctx.font = font(fs.std, true); ctx.fillStyle = '#1b2233'; ctx.textAlign = 'left';
-      if (noStdBand) { ctx.textBaseline = 'middle'; ctx.fillText(NOSTD, L.left + 6, L.bandTop + rowI * (fs.std + 8) + fs.std / 2 + 2); }
+      if (noStdBand) { ctx.textBaseline = 'middle'; ctx.fillText(NOSTD, L.left + 4, L.bandTop + rowI * (fs.std + 8) + fs.std / 2 + 2); }
       else if (L.noStdAt) { ctx.textBaseline = 'top'; ctx.fillText(NOSTD, L.noStdAt.x + 4, L.noStdAt.y + 3); }
     }
     // 外框
