@@ -564,3 +564,17 @@ test('#59 折線圖：前 12 站實線、第 13 站起虛線；Excel 輸出 line
   const bar = CH.barChartXml({ spec, catRef: "'s'!$A$2:$A$3", series: [ref, ref], stdSeries: [] });
   assert.ok(/<c:barChart>/.test(bar), '預設仍是長條圖');
 });
+
+test('#60 離子：電荷上標、多原子離子最後一位是電荷；NO3-N 的 -N 不算電荷', () => {
+  const f = (t) => CH.richSegs(t).map(g => g.m === 'n' ? g.t : g.m === 'sub' ? '_{' + g.t + '}' : '^{' + g.t + '}').join('');
+  assert.equal(f('SO42-'), 'SO_{4}^{2-}');
+  assert.equal(f('硫酸鹽(SO42-)'), '硫酸鹽(SO_{4}^{2-})');
+  assert.equal(f('PO43-'), 'PO_{4}^{3-}');
+  assert.equal(f('NO3-'), 'NO_{3}^{-}');
+  assert.equal(f('NH4+'), 'NH_{4}^{+}');
+  assert.equal(f('Ca2+'), 'Ca^{2+}');
+  assert.equal(f('Cl-'), 'Cl^{-}');
+  assert.equal(f('NO3-N'), 'NO_{3}-N');
+  assert.equal(f('NH3-N'), 'NH_{3}-N');
+  ['A-1站', 'B2-3', 'CO 8小時平均值'].forEach(t => assert.equal(f(t), t));
+});

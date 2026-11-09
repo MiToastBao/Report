@@ -32,6 +32,25 @@
       if (parts.length < 2 && !SINGLE_F[tok]) continue;
       var pos = st; parts.forEach(function (p) { var sym = p.replace(/\d+$/, ''); mark(pos + sym.length, pos + p.length, 'sub'); pos += p.length; });
     }
+    // v1.0.17（#60）離子：化學式後面接 +／-（後面不是字母，所以 NO3-N 的 -N 不算）＝電荷上標。
+    //   多原子離子最後一組數字兩位以上時最後一位是電荷（SO42- → SO₄²⁻、PO43- → PO₄³⁻），一位時是下標（NO3- → NO₃⁻、NH4+ → NH₄⁺）；
+    //   單一元素的數字是電荷（Ca2+ → Ca²⁺、Fe3+ → Fe³⁺、Cl- → Cl⁻）；化學式後空一格再寫電荷（SO4 2-）也可以
+    re = /(^|[^A-Za-z0-9])((?:[A-Z][a-z]?\d*)+)(\s?)(\d?[+\-])(?![A-Za-z0-9])/g;
+    while ((r = re.exec(text))) {
+      var itok = r[2], ist = r.index + r[1].length, iparts = itok.match(/[A-Z][a-z]?\d*/g) || [], sp = r[3], chg = r[4];
+      if (!iparts.every(function (p) { return ELEM.indexOf(' ' + p.replace(/\d+$/, '') + ' ') >= 0; })) continue;
+      if (/^PM/.test(itok)) continue;
+      var lastDig = (iparts[iparts.length - 1].match(/\d+$/) || [''])[0], body = itok, chargeNum = '';
+      if (!sp && chg.length === 1 && lastDig) {
+        if (iparts.length === 1) { chargeNum = lastDig; body = itok.slice(0, itok.length - lastDig.length); }
+        else if (lastDig.length >= 2) { chargeNum = lastDig.slice(-1); body = itok.slice(0, -1); }
+      }
+      var ipos = ist, bparts = body.match(/[A-Z][a-z]?\d*/g) || [];
+      for (k = ist; k < ist + itok.length; k++) m[k] = 'n';
+      bparts.forEach(function (p) { var sym = p.replace(/\d+$/, ''); mark(ipos + sym.length, ipos + p.length, 'sub'); ipos += p.length; });
+      var cs = ist + body.length; // 空格也縮成上標大小，看起來不會分開
+      mark(cs, ist + itok.length + sp.length + chg.length, 'sup');
+    }
     // v1.0.16（#55）噪音：Leq、Lmax、LAeq 等下標；L日／L晚／L夜 的日晚夜下標；Lx（L10、L50、L90）數字下標；振動 LV10 的 V10 下標；水質 BOD5 的 5 下標
     re = /(^|[^A-Za-z])L(A?eq|A?max|A?min)(?![A-Za-z])/g;
     while ((r = re.exec(text))) { k = r.index + r[1].length + 1; mark(k, k + r[2].length, 'sub'); }
