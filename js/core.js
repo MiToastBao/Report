@@ -230,7 +230,7 @@
         var series = o.stations.filter(function (st) { return rs.some(function (r) { return r.st === st; }); }).map(function (st) {
           var vals = cats.map(function () { return null; });
           pts.forEach(function (p) { if (p.r.st === st) vals[cats.indexOf(p.lab)] = { raw: p.r.raw, num: valOf(p.r.raw).num, kind: valOf(p.r.raw).kind, cls: valOf(p.r.raw).cls, iso: p.r.iso }; });
-          return { name: st, values: vals };
+          return { name: st, values: vals, ci: o.stations.indexOf(st) };   // v1.0.16（#49）顏色依測站在全部測站中的順序固定
         });
         // 標準線：各站相同才畫一條；不同時每個值各一條並標明測站
         var lines = [], seen = {};

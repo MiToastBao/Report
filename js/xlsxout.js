@@ -155,7 +155,7 @@
           styleCell(a); styleCell(b); styleCell(cv, { color: ln && ln.bound === 'lo' ? 'FF1238A6' : 'FFE03131', bold: true }); styleCell(m1c); styleCell(m2c); styleCell(dsc, { left: true });
           // 隱藏的繪圖用儲存格：名稱與每個採樣日期的標準值（不在期間內＝#N/A，不畫線）
           var unitTxt = spec.unit ? ' ' + spec.unit.replace(/"/g, '""') : '';
-          var txt = ln ? C.stdText(ln, spec.unit) : '';
+          var txt = ln ? C.stdText(ln, spec.unit, info.stdSites) : '';
           var nameCell = ws.getCell(row, helperCol);
           var A = '$A$' + row, B = '$B$' + row;
           function roc(X) { return '(YEAR(' + X + ')-1911)&TEXT(' + X + ',".mm.dd")'; }
@@ -183,7 +183,7 @@
         endRow++;
       }
       var chartRows = spec.kind === 'item' ? 22 : 18;
-      plan.charts.push({ xml: C.barChartXml({ spec: spec, catRef: catRef, series: series, stdSeries: stdSeries, zero: info.zero, yRange: info.yRange }), col: col0, row: hr - 1, cols: spec.kind === 'item' ? 12 : 10, rows: chartRows });
+      plan.charts.push({ xml: C.barChartXml({ spec: spec, catRef: catRef, series: series, stdSeries: stdSeries, zero: info.zero, yRange: info.yRange, type: info.type }), col: col0, row: hr - 1, cols: spec.kind === 'item' ? 12 : 10, rows: chartRows });
       r = Math.max(endRow, hr + chartRows) + 2;
     });
     ws.getColumn(1).width = 22; ws.getColumn(2).width = 22; ws.getColumn(3).width = 16; ws.getColumn(4).width = 16;
@@ -230,7 +230,7 @@
         byStation[c.station].charts.push(c);
       });
     }
-    groups.forEach(function (g) { plans.push(chartSheet(wb, nm(g.name), g, { std: o.std, zero: o.zero, yRange: o.yRange })); });
+    groups.forEach(function (g) { plans.push(chartSheet(wb, nm(g.name), g, { std: o.std, zero: o.zero, yRange: o.yRange, stdSites: o.stdSites, type: o.chartType })); });
     return wb.xlsx.writeBuffer().then(function (buf) { return C.inject(JSZip, buf, plans); });
   }
 

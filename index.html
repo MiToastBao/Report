@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>監測報告趨勢圖產生器</title>
-<link rel="stylesheet" href="css/app.css?v=1.0.15">
+<link rel="stylesheet" href="css/app.css?v=1.0.16">
 </head>
 <body>
 <div class="shell">
@@ -13,7 +13,7 @@
       <div class="mark" aria-hidden="true"><svg viewBox="0 0 32 32" width="26" height="26"><rect x="5" y="16" width="4.5" height="11" rx="1.2" fill="#fff" opacity=".55"/><rect x="11.5" y="10" width="4.5" height="17" rx="1.2" fill="#fff" opacity=".8"/><rect x="18" y="13" width="4.5" height="14" rx="1.2" fill="#fff" opacity=".65"/><rect x="24.5" y="6" width="4.5" height="21" rx="1.2" fill="#fff"/><path d="M3 9.5 H29" stroke="#ff8a8a" stroke-width="1.6" stroke-dasharray="2.6 2"/></svg></div>
       <div>
         <div class="brand-name">監測報告<br>趨勢圖產生器</div>
-        <div class="brand-ver" id="verPill">v1.0.15</div>
+        <div class="brand-ver" id="verPill">v1.0.16</div>
       </div>
     </div>
     <div class="proj-box">
@@ -35,7 +35,7 @@
       <div class="nav-group">不分計畫</div>
       <button class="nav-item" data-sec="moenv"><span class="nav-no">7</span>環境部資料查詢</button>
       <button class="nav-item" data-sec="backup"><span class="nav-no">8</span>備份與還原</button>
-      <a class="nav-item nav-link" href="使用說明.html?v=1.0.15" target="_blank" rel="noopener"><span class="nav-no">?</span>使用說明</a>
+      <a class="nav-item nav-link" href="使用說明.html?v=1.0.16" target="_blank" rel="noopener"><span class="nav-no">?</span>使用說明</a>
     </nav>
     <div class="side-foot">資料只存在這台電腦的瀏覽器，不會上傳。</div>
   </aside>
@@ -186,6 +186,11 @@
               <label>訖<select id="gToY"></select></label><label>月<select id="gToM"></select></label>
             </div>
             <div class="opt-block">
+              <div class="opt-title">圖形</div>
+              <label class="radio"><input type="radio" name="gType" value="bar" checked> 長條圖</label>
+              <label class="radio"><input type="radio" name="gType" value="line"> 折線圖（測站多時較容易看出趨勢；ND 等沒有數值的那一次斷開）</label>
+            </div>
+            <div class="opt-block">
               <div class="opt-title">圖的樣式</div>
               <label class="radio"><input type="radio" name="gMode" value="station" checked> 每個測站、每個測項各一張</label>
               <label class="radio"><input type="radio" name="gMode" value="item"> 每個測項一張，各測站並列</label>
@@ -204,9 +209,26 @@
                   </select>
                   <span id="gGridCustom" class="grid-custom" hidden><input type="number" id="gGridC" min="1" max="6" value="2"> 欄 × <input type="number" id="gGridR" min="1" max="8" value="4"> 列</span>
                 </div>
-                <label class="chk"><input type="checkbox" id="gGridTitle"> 大圖上方印標題（報告的圖說若寫在 Word 裡就不用勾）</label>
-                <div class="small muted">欄＝左右幾張、列＝上下幾張。測項比格子多時自動分成第 2 張大圖，少的格子留白。每格不重複寫測站名稱。</div>
+                <div class="small muted">欄＝左右幾張、列＝上下幾張。測項比格子多時自動分成第 2 張大圖，少的格子留白。每格不重複寫測站名稱；「一個測站一張」只有一個測站，不畫圖例。文字大小預設和單張圖相同。</div>
               </div>
+              <details class="txt-box" id="gTxtBox"><summary>文字：顯示與大小<span class="yr-sum" id="gTxtSum"></span></summary>
+                <div class="grid-row"><span class="grid-lab">文字大小</span>
+                  <select id="gFk"><option value="0.5">0.5 倍</option><option value="1" selected>1 倍（預設）</option><option value="1.2">1.2 倍</option><option value="1.4">1.4 倍</option></select></div>
+                <div class="grid-row grid-show"><span class="grid-lab">顯示</span>
+                  <label class="chk" id="gGridTitleLab"><input type="checkbox" id="gGridTitle"> 大圖標題</label>
+                  <label class="chk" id="gStTitleLab"><input type="checkbox" id="gStTitle" checked> 標題裡的測站名稱</label>
+                  <label class="chk"><input type="checkbox" id="gShTitle" checked> 測項名稱（標題）</label>
+                  <label class="chk"><input type="checkbox" id="gShYTitle" checked> Y 軸標題</label>
+                  <label class="chk"><input type="checkbox" id="gShYTicks" checked> Y 軸刻度數字</label>
+                  <label class="chk"><input type="checkbox" id="gShXTicks" checked> X 軸標籤（日期）</label>
+                  <label class="chk"><input type="checkbox" id="gShStd" checked> 標準值文字（虛線照畫）</label>
+                  <label class="chk"><input type="checkbox" id="gStdSites"> 標準值後面寫適用測站（各站標準不同時）</label></div>
+                <div class="grid-row" id="gLegRow"><span class="grid-lab">圖例</span>
+                  <label class="radio" id="gLegShared"><input type="radio" name="gLeg" value="shared" checked> 整張大圖共用一份</label>
+                  <label class="radio"><input type="radio" name="gLeg" value="each"> <span id="gLegEachTxt">每格各一份</span></label>
+                  <label class="radio"><input type="radio" name="gLeg" value="none"> 不顯示（可另外下載圖例圖）</label></div>
+                <div class="small muted">標題裡的測站名稱與測項名稱都不勾，就沒有標題。大圖標題（拼成大圖時）預設不印，報告的圖說通常寫在 Word。ND、&lt;X 等文字在上方「沒有數值的格子」設定。</div>
+              </details>
             </div>
             <div class="opt-block">
               <div class="opt-title">X 軸</div>
@@ -216,18 +238,18 @@
             </div>
             <div class="opt-block">
               <label class="chk"><input type="checkbox" id="gStd"> 畫標準值虛線（上限紅色、下限藍色；Excel 裡的標準值可以自行修改，線會跟著變）</label>
+              <label class="chk sub-chk"><input type="checkbox" id="gNoStd"> 沒有標準值的測項標示「無標準值」（不勾＝什麼都不寫）</label>
               <div class="std-peek"><span id="gStdPeek" class="muted small"></span> <button class="btn small" id="gStdEdit" type="button">設定標準值…</button></div>
               <label class="chk"><input type="checkbox" id="gStdAxis" checked> Y 軸範圍包含標準值（取消時，標準值超出資料範圍就不畫線）</label>
               <label class="chk"><input type="checkbox" id="gZero" checked> Y 軸從 0 開始</label>
-              <div class="yr-box"><div class="opt-title">Y 軸範圍（依測項，留空＝自動）</div>
+              <details class="yr-box" id="gYrBox"><summary class="opt-title">Y 軸範圍（依測項，留空＝自動）<span class="yr-sum" id="gYrSum"></span></summary>
                 <div class="small muted">只填上限或只填下限也可以。超出範圍的長條會截在邊界並標出實際數值（▲ 超過上限、▼ 低於下限）；超出範圍的標準值不畫線，會在圖上方註明。會記住，下次自動套用；Excel 圖表也一樣。</div>
-                <div id="gYr" class="yr-list"></div></div>
+                <div id="gYr" class="yr-list"></div></details>
               <div class="mark-row"><span class="small muted">沒有數值的格子不畫長條；勾選的在圖上標出文字：</span>
                 <label class="chk"><input type="checkbox" id="gND"> ND</label>
                 <label class="chk"><input type="checkbox" id="gLT"> &lt;X、&gt;X</label>
                 <label class="chk"><input type="checkbox" id="gNA"> NA、未檢測</label>
                 <label class="chk"><input type="checkbox" id="gPH"> 佔位文字（－、/、＊、無、分析中、待補）</label></div>
-              <label class="chk"><input type="checkbox" id="gStTitle" checked> 圖標題加上測站名稱（每站一張時）</label>
             </div>
             <div class="opt-block">
               <div class="opt-title">Excel 報告表格分頁</div>
@@ -238,8 +260,18 @@
           </div>
           <div>
             <div class="pick-note">① 先勾選要畫的<b>測站</b>與<b>測項</b>，只會畫勾選的組合。<span id="gPlan" class="plan"></span></div>
-            <div class="opt-block"><div class="opt-title">測站 <a href="#" class="mini" data-all="gSts">全選</a> <a href="#" class="mini" data-none="gSts">全不選</a></div><div class="checks" id="gSts"></div></div>
-            <div class="opt-block"><div class="opt-title">測項 <a href="#" class="mini" data-all="gItems">全選</a> <a href="#" class="mini" data-none="gItems">全不選</a></div><div class="checks" id="gItems"></div></div>
+            <div class="opt-block"><div class="opt-title">測站 <a href="#" class="mini" data-all="gSts">全選</a> <a href="#" class="mini" data-none="gSts">全不選</a> <a href="#" class="mini" id="gAliasBtn">圖上顯示名稱…</a></div><div class="checks" id="gSts"></div>
+              <div class="ord-box" id="gAlias" hidden>
+                <div class="ord-head"><b>測站在圖上顯示的名稱</b><span class="small muted">只改圖上（標題、圖例、標準值文字、Excel 圖表）的名稱；資料、報告表格不變。留空＝用原本名稱；每個監測類別各記一份</span></div>
+                <div class="alias-list" id="gAliasList"></div>
+                <div class="ord-act"><button type="button" class="btn small" id="gAliasReset">全部清空</button><button type="button" class="btn small primary" id="gAliasDone">完成</button></div>
+              </div></div>
+            <div class="opt-block"><div class="opt-title">測項 <a href="#" class="mini" data-all="gItems">全選</a> <a href="#" class="mini" data-none="gItems">全不選</a> <a href="#" class="mini" id="gOrdBtn">調整順序…</a></div><div class="checks" id="gItems"></div>
+              <div class="ord-box" id="gOrd" hidden>
+                <div class="ord-head"><b>測項順序</b><span class="small muted">圖（含拼成大圖的格子）、Excel 都照這個順序；每個監測類別各記一份</span></div>
+                <ol class="ord-list" id="gOrdList"></ol>
+                <div class="ord-act"><button type="button" class="btn small" id="gOrdReset">恢復預設順序</button><button type="button" class="btn small primary" id="gOrdDone">完成</button></div>
+              </div></div>
           </div>
         </div>
         <div class="actions">
@@ -322,17 +354,17 @@
   </main>
 </div>
 
-<script src="vendor/jszip.min.js?v=1.0.15"></script>
-<script src="vendor/xlsx.full.min.js?v=1.0.15"></script>
-<script src="vendor/exceljs.min.js?v=1.0.15"></script>
-<script src="js/version.js?v=1.0.15"></script>
-<script src="js/docread.js?v=1.0.15"></script>
-<script src="js/extract.js?v=1.0.15"></script>
-<script src="js/core.js?v=1.0.15"></script>
-<script src="js/chart.js?v=1.0.15"></script>
-<script src="js/xlsxout.js?v=1.0.15"></script>
-<script src="js/moenv.js?v=1.0.15"></script>
-<script src="js/store.js?v=1.0.15"></script>
-<script src="js/app.js?v=1.0.15"></script>
+<script src="vendor/jszip.min.js?v=1.0.16"></script>
+<script src="vendor/xlsx.full.min.js?v=1.0.16"></script>
+<script src="vendor/exceljs.min.js?v=1.0.16"></script>
+<script src="js/version.js?v=1.0.16"></script>
+<script src="js/docread.js?v=1.0.16"></script>
+<script src="js/extract.js?v=1.0.16"></script>
+<script src="js/core.js?v=1.0.16"></script>
+<script src="js/chart.js?v=1.0.16"></script>
+<script src="js/xlsxout.js?v=1.0.16"></script>
+<script src="js/moenv.js?v=1.0.16"></script>
+<script src="js/store.js?v=1.0.16"></script>
+<script src="js/app.js?v=1.0.16"></script>
 </body>
 </html>

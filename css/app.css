@@ -328,13 +328,20 @@ table.mv-t th:first-child { background: #eef2f9; }
 
 /* v1.0.13 Y 軸範圍（依測項） */
 .yr-box { margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
-.yr-box .opt-title { margin-bottom: 4px; }
-.yr-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 16px; margin-top: 8px; }
-.yr-row { display: grid; grid-template-columns: minmax(0, 1fr) 72px auto 72px 4.5em; align-items: center; gap: 6px; }
-.yr-row .yr-name { min-width: 0; overflow-wrap: anywhere; }
-.yr-row input[type=text] { width: 100%; min-width: 0; box-sizing: border-box; padding: 4px 6px; }
+.yr-box > summary { cursor: pointer; list-style: none; display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 4px; }
+.yr-box > summary::-webkit-details-marker { display: none; }
+.yr-box > summary::before { content: "▸"; display: inline-block; width: 1.1em; color: var(--muted); }
+.yr-box[open] > summary::before { content: "▾"; }
+.yr-box[open] > summary { margin-bottom: 4px; }
+.yr-sum { font-weight: normal; color: var(--muted); font-size: 13px; }
+/* v1.0.16（#48）：以前每欄最窄 260px、名稱欄吃剩下的寬度，視窗 1536 寬（1920 螢幕 125%）時名稱被擠成一字一行 */
+.yr-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 6px 16px; margin-top: 8px; }
+.yr-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 2px 0; }
+.yr-row .yr-name { flex: 1 1 7em; min-width: 5em; overflow-wrap: anywhere; }
+.yr-row .yr-in { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.yr-row input[type=text] { width: 72px; min-width: 0; box-sizing: border-box; padding: 4px 6px; }
 .yr-row input.bad { border-color: #c62828; background: #fdecea; }
-.yr-row .yr-unit { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.yr-row .yr-unit { color: var(--muted); font-size: 12px; width: 5em; overflow-wrap: anywhere; line-height: 1.25; }
 .yr-msg { grid-column: 1 / -1; color: #c62828; font-size: 13px; }
 
 /* v1.0.13 標準值期間重疊 */
@@ -348,3 +355,33 @@ table.mv-t th:first-child { background: #eef2f9; }
 .grid-opt .grid-custom input[type=number] { width: 64px; min-width: 0; padding-left: 8px; padding-right: 4px; }
 .fig.grid-fig canvas { max-width: 100%; }
 .fig.grid-fig { grid-column: 1 / -1; max-width: 1240px; }
+/* v1.0.16（#54）hidden 屬性一律優先（.chk、.grid-row 等設了 display 的元素原本藏不住） */
+[hidden] { display: none !important; }
+/* v1.0.16 測項順序 */
+.ord-box { margin: 8px 0 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #fafbfd; }
+.ord-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 6px; }
+.ord-list { margin: 0; padding-left: 26px; max-height: 360px; overflow: auto; }
+.ord-list li { padding: 3px 0; border-bottom: 1px dashed #e3e7ee; }
+.ord-list li > * { vertical-align: middle; }
+.ord-list li { display: list-item; }
+.ord-list .ord-name { display: inline-block; min-width: 0; max-width: calc(100% - 110px); overflow-wrap: anywhere; }
+.ord-list .ord-btns { float: right; display: inline-flex; gap: 4px; }
+.ord-list li.off .ord-name { color: #8a93a6; }
+.ord-list button[disabled] { opacity: .35; cursor: default; }
+.ord-act { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.ord-list li::after { content: ""; display: block; clear: both; }
+.ord-list .mini-btn { border: 1px solid #cfd6e4; border-radius: 6px; background: #fff; min-width: 26px; line-height: 1.2; }
+.ord-list .mini-btn:not([disabled]):hover { background: #eef3fd; }
+.txt-box { margin: 6px 0; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 8px; background: #fbfcfe; }
+.txt-box > summary { cursor: pointer; font-weight: 600; list-style: none; }
+.txt-box > summary::-webkit-details-marker { display: none; }
+.txt-box > summary::before { content: "▸"; display: inline-block; width: 1.1em; color: var(--muted); }
+.txt-box[open] > summary::before { content: "▾"; }
+.txt-box[open] > summary { margin-bottom: 6px; }
+.grid-show .chk { margin-right: 4px; }
+.sub-chk { margin-left: 24px; }
+/* v1.0.16 測站圖上名稱 */
+.alias-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 6px 14px; max-height: 360px; overflow: auto; }
+.alias-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.alias-row .alias-orig { flex: 1 1 9em; min-width: 6em; overflow-wrap: anywhere; font-size: 13px; }
+.alias-row input[type=text] { flex: 1 1 9em; min-width: 0; width: auto; padding: 4px 6px; }

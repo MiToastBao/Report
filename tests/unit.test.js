@@ -522,3 +522,45 @@ test('#39/#40 拼圖分頁：第 3 種依測站分組、第 4 種全部一組；
   assert.deepEqual(pg4.map(p => [p.page, p.pages, p.idx.length]), [[1, 1, 5]]);
   assert.equal(CH.gridPages(specs, 1, 1, null).length, 20);
 });
+
+test('#52 上下標：PM、化學式、NOx 下標，m3 上標；測站名稱與非化學式不變', () => {
+  const f = (t, pl) => CH.richSegs(t, pl).map(g => g.m === 'n' ? g.t : g.m === 'sub' ? '_{' + g.t + '}' : '^{' + g.t + '}').join('');
+  assert.equal(f('PM2.5 24小時值'), 'PM_{2.5} 24小時值');
+  assert.equal(f('SO2 小時平均值'), 'SO_{2} 小時平均值');
+  assert.equal(f('NOx 日平均值'), 'NO_{x} 日平均值');
+  assert.equal(f('O3 8小時平均值'), 'O_{3} 8小時平均值');
+  assert.equal(f('NH3-N'), 'NH_{3}-N');
+  assert.equal(f('PM10 (μg/m3)'), 'PM_{10} (μg/m^{3})');
+  ['CO 8小時平均值', 'pH值', 'TSP 24小時值', 'A1', '水深10m第2點', 'LED', 'Lab'].forEach(t => assert.equal(f(t), t));
+  // #55 噪音、振動、BOD5（使用者 2026-11-09 裁示）
+  assert.equal(f('Leq'), 'L_{eq}'); assert.equal(f('Lmax夜'), 'L_{max}夜'); assert.equal(f('L日'), 'L_{日}');
+  assert.equal(f('LV10日'), 'L_{V10}日'); assert.equal(f('L90'), 'L_{90}'); assert.equal(f('生化需氧量(BOD5)'), '生化需氧量(BOD_{5})');
+  assert.equal(f('B2測站　PM10', ['B2測站']), 'B2測站　PM_{10}');
+});
+
+test('#49 各測站並列：顏色依測站在全部測站中的順序固定（某測項少一站時不往前移）', () => {
+  const recs = [['甲', 'a'], ['乙', 'a'], ['丙', 'a'], ['甲', 'b'], ['丙', 'b']].map(([st, it], i) => ({ k: 'r' + i, cat: 'c', st, item: it, iso: '2025-01-15', dl: '114.01', raw: '5', unit: '' }));
+  const ch = Co.buildCharts(recs, [], { cat: 'c', stations: ['甲', '乙', '丙'], items: ['a', 'b'], mode: 'item', xmode: 'date' });
+  assert.deepEqual(ch[1].series.map(s => s.name + s.ci), ['甲0', '丙2']);
+  const xml = CH.barChartXml({ spec: ch[1], catRef: "'s'!$A$2:$A$2", series: ch[1].series.map((s, i) => ({ nameRef: "'s'!$B$1", valRef: "'s'!$B$2:$B$2" })), stdSeries: [] });
+  assert.ok(xml.indexOf(CH.PALETTE[2].slice(1)) > 0, '丙用第 3 個顏色');
+});
+
+test('#46/#47/#50 拼圖：圖例共用時取各格測站聯集、依顏色順序；隱藏選項不影響分頁', () => {
+  const sp = (names) => ({ kind: 'item', title: 'x', series: names.map(([n, ci]) => ({ name: n, ci, values: [] })) });
+  assert.deepEqual(CH.legendItems([sp([['甲', 0], ['丙', 2]]), sp([['乙', 1], ['甲', 0]])]).map(i => i.name), ['甲', '乙', '丙']);
+  assert.deepEqual(CH.legendItems([{ kind: 'station', series: [{ name: 'a', values: [] }] }]), [], '第 3 種單一測站不畫圖例');
+});
+
+test('#59 折線圖：前 12 站實線、第 13 站起虛線；Excel 輸出 lineChart、標記與線型一致', () => {
+  const st = (ci) => CH.lineStyleOf({ ci }, ci, true);
+  assert.deepEqual([st(0).xlDash, st(11).xlDash, st(12).xlDash, st(18).xlDash], ['solid', 'solid', 'sysDash', 'sysDot']);
+  assert.notEqual(st(0).marker, st(1).marker);
+  const spec = { kind: 'item', title: 'x', item: 'x', unit: '', cats: ['a', 'b'], series: [{ name: '甲', ci: 0, values: [{ num: 5 }, null] }, { name: '乙', ci: 12, values: [{ num: 3 }, { num: 4 }] }], stdLines: [] };
+  const ref = { nameRef: "'s'!$B$1", valRef: "'s'!$B$2:$B$3" };
+  const xml = CH.barChartXml({ spec, catRef: "'s'!$A$2:$A$3", series: [ref, ref], stdSeries: [], type: 'line' });
+  assert.ok(/<c:lineChart>/.test(xml) && !/<c:barChart>/.test(xml));
+  assert.ok(/prstDash val="sysDash"/.test(xml) && /symbol val="circle"/.test(xml) && /dispBlanksAs val="gap"/.test(xml));
+  const bar = CH.barChartXml({ spec, catRef: "'s'!$A$2:$A$3", series: [ref, ref], stdSeries: [] });
+  assert.ok(/<c:barChart>/.test(bar), '預設仍是長條圖');
+});
